@@ -25,11 +25,3 @@ plugins {
 
 include(":app")
 
-gradle.beforeProject {
-    plugins.withId("com.android.library") {
-        val android = extensions.findByName("android") as? com.android.build.gradle.BaseExtension
-        if (android?.namespace == null) {
-            android?.namespace = "com.plugin.${name.replace("-", "_")}"
-        }
-    }
-}

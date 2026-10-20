@@ -20,12 +20,12 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Perbaikan otomatis namespace untuk plugin lama (seperti blue_thermal_printer)
+// Injeksi namespace langsung saat plugin diaplikasikan (Tanpa afterEvaluate)
 subprojects {
-    afterEvaluate {
-        val androidExtension = extensions.findByName("android") as? com.android.build.gradle.BaseExtension
-        if (androidExtension != null && androidExtension.namespace == null) {
-            androidExtension.namespace = group.toString()
+    plugins.withId("com.android.library") {
+        val android = extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)
+        if (android != null && android.namespace == null) {
+            android.namespace = "com.plugin.${project.name.replace("-", "_")}"
         }
     }
 }
