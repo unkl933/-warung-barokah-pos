@@ -417,76 +417,69 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Fungsi Cetak Bluetooth menggunakan flutter_bluetooth_printer
+    // Fungsi Cetak Bluetooth menggunakan flutter_bluetooth_printer
   Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
     try {
-      final device = await SelectPrinter.connect(context);
-      if (device != null) {
-        await FlutterBluetoothPrinter.print(
-          address: device.address,
-          builder: (context) {
-            return Container(
-              padding: const EdgeInsets.all(10),
-              color: Colors.white,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
+      // Menggunakan widget cetak bawaan plugin yang otomatis memunculkan pilihan printer
+      await PrintBluetooth.print(
+        builder: (context) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text('WARUNG BAROKAH KIARAJANGKUNG',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const Text('Kiarajangkung, Sukahening, Tasikmalaya',
+                  style: TextStyle(fontSize: 10)),
+              const Divider(),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
+                    style: const TextStyle(fontSize: 10)),
+              ),
+              const Divider(),
+              ...trx.items.map((item) => Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                          child: Text('${item.product.name} x${item.quantity}',
+                              style: const TextStyle(fontSize: 12))),
+                      Text(currencyFormatter.format(item.totalPrice),
+                          style: const TextStyle(fontSize: 12)),
+                    ],
+                  )),
+              const Divider(),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('WARUNG BAROKAH KIARAJANGKUNG',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  const Text('Kiarajangkung, Sukahening, Tasikmalaya',
-                      style: TextStyle(fontSize: 10)),
-                  const Divider(),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                        'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
-                        style: const TextStyle(fontSize: 10)),
-                  ),
-                  const Divider(),
-                  ...trx.items.map((item) => Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                              child: Text('${item.product.name} x${item.quantity}',
-                                  style: const TextStyle(fontSize: 12))),
-                          Text(currencyFormatter.format(item.totalPrice),
-                              style: const TextStyle(fontSize: 12)),
-                        ],
-                      )),
-                  const Divider(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Total:',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      Text(currencyFormatter.format(trx.total),
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Bayar:'),
-                      Text(currencyFormatter.format(trx.payAmount)),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Kembali:'),
-                      Text(currencyFormatter.format(trx.change)),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  const Text('Terima Kasih Atas Kunjungan Anda!',
-                      style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                  const Text('Total:',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(currencyFormatter.format(trx.total),
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
-            );
-          },
-        );
-      }
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Bayar:'),
+                  Text(currencyFormatter.format(trx.payAmount)),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Kembali:'),
+                  Text(currencyFormatter.format(trx.change)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text('Terima Kasih Atas Kunjungan Anda!',
+                  style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+            ],
+          );
+        },
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Gagal mencetak: $e')),
