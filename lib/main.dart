@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_bluetooth_printer/flutter_bluetooth_printer.dart';
 
 void main() {
   runApp(const WarungBarokahApp());
@@ -100,29 +101,27 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Otomatis tarik data dari Google Sheets saat aplikasi pertama kali dibuka
     fetchProductsFromGoogleSheets();
   }
 
   // Fungsi Ambil Data dari Google Sheets
-    // Fungsi Ambil Data dari Google Sheets
   Future<void> fetchProductsFromGoogleSheets() async {
-    final url = Uri.parse('https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
-
+    final url = Uri.parse(
+        'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
-        
-        // Hanya perbarui list jika Google Sheets ada isinya
         if (data.isNotEmpty) {
           setState(() {
-            products = data.map((item) => Product(
-              id: item['id'],
-              name: item['name'],
-              price: (item['price'] as num).toDouble(),
-              stock: (item['stock'] as num).toInt(),
-            )).toList();
+            products = data
+                .map((item) => Product(
+                      id: item['id'],
+                      name: item['name'],
+                      price: (item['price'] as num).toDouble(),
+                      stock: (item['stock'] as num).toInt(),
+                    ))
+                .toList();
           });
         }
       }
@@ -131,11 +130,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-
   // Fungsi Kirim Produk Baru ke Google Sheets
   Future<void> addProductToGoogleSheets(Product newProduct) async {
-    final url = Uri.parse('https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
-
+    final url = Uri.parse(
+        'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
     try {
       await http.post(
         url,
@@ -226,13 +224,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             itemBuilder: (context, index) {
               final prod = products[index];
               return ListTile(
-                title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
+                title: Text(prod.name,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                    '${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
                 trailing: ElevatedButton(
                   onPressed: prod.stock > 0
                       ? () {
                           setState(() {
-                            int existingIndex = cart.indexWhere((c) => c.product.id == prod.id);
+                            int existingIndex =
+                                cart.indexWhere((c) => c.product.id == prod.id);
                             if (existingIndex != -1) {
                               if (cart[existingIndex].quantity < prod.stock) {
                                 cart[existingIndex].quantity++;
@@ -268,7 +269,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.remove_circle, color: Colors.red),
+                              icon: const Icon(Icons.remove_circle,
+                                  color: Colors.red),
                               onPressed: () {
                                 setState(() {
                                   if (item.quantity > 1) {
@@ -279,9 +281,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                                 });
                               },
                             ),
-                            Text('${item.quantity}', style: const TextStyle(fontSize: 16)),
+                            Text('${item.quantity}',
+                                style: const TextStyle(fontSize: 16)),
                             IconButton(
-                              icon: const Icon(Icons.add_circle, color: Colors.green),
+                              icon: const Icon(Icons.add_circle,
+                                  color: Colors.green),
                               onPressed: () {
                                 setState(() {
                                   if (item.quantity < item.product.stock) {
@@ -321,10 +325,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green[700],
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 12),
                 ),
-                onPressed: cart.isEmpty ? null : () => showPaymentDialog(totalBelanja),
-                child: const Text('BAYAR', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                onPressed:
+                    cart.isEmpty ? null : () => showPaymentDialog(totalBelanja),
+                child: const Text('BAYAR',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               )
             ],
           ),
@@ -336,6 +344,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   // Dialog Pembayaran
   void showPaymentDialog(double total) {
     TextEditingController payController = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) {
@@ -345,7 +354,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('Total: ${currencyFormatter.format(total)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 10),
               TextField(
                 controller: payController,
@@ -374,7 +384,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   }
 
                   TransactionRecord trx = TransactionRecord(
-                    id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                    id: DateTime.now()
+                        .millisecondsSinceEpoch
+                        .toString()
+                        .substring(7),
                     date: DateTime.now(),
                     items: List.from(cart),
                     total: total,
@@ -383,7 +396,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   );
 
                   transactions.add(trx);
-
                   setState(() {
                     cart.clear();
                   });
@@ -392,7 +404,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   showReceiptDialog(trx);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Uang pembayaran tidak cukup!')),
+                    const SnackBar(
+                        content: Text('Uang pembayaran tidak cukup!')),
                   );
                 }
               },
@@ -404,62 +417,156 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  // Fungsi Cetak Bluetooth menggunakan flutter_bluetooth_printer
+  Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
+    try {
+      final device = await SelectPrinter.connect(context);
+      if (device != null) {
+        await FlutterBluetoothPrinter.print(
+          address: device.address,
+          builder: (context) {
+            return Container(
+              padding: const EdgeInsets.all(10),
+              color: Colors.white,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Text('WARUNG BAROKAH KIARAJANGKUNG',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const Text('Kiarajangkung, Sukahening, Tasikmalaya',
+                      style: TextStyle(fontSize: 10)),
+                  const Divider(),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                        'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
+                        style: const TextStyle(fontSize: 10)),
+                  ),
+                  const Divider(),
+                  ...trx.items.map((item) => Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                              child: Text('${item.product.name} x${item.quantity}',
+                                  style: const TextStyle(fontSize: 12))),
+                          Text(currencyFormatter.format(item.totalPrice),
+                              style: const TextStyle(fontSize: 12)),
+                        ],
+                      )),
+                  const Divider(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total:',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(currencyFormatter.format(trx.total),
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Bayar:'),
+                      Text(currencyFormatter.format(trx.payAmount)),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Kembali:'),
+                      Text(currencyFormatter.format(trx.change)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('Terima Kasih Atas Kunjungan Anda!',
+                      style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                ],
+              ),
+            );
+          },
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal mencetak: $e')),
+      );
+    }
+  }
+
   // Struk / Cetak Preview
   void showReceiptDialog(TransactionRecord trx) {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('WARUNG BAROKAH KIARAJANGKUNG',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const Text('Kiarajangkung, Sukahening, Tasikmalaya',
-                  textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
-              const Divider(),
-              Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
-                  style: const TextStyle(fontSize: 10)),
-              const Divider(),
-              ...trx.items.map((item) => Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${item.product.name} x${item.quantity}', style: const TextStyle(fontSize: 12)),
-                      Text(currencyFormatter.format(item.totalPrice), style: const TextStyle(fontSize: 12)),
-                    ],
-                  )),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Total:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Bayar:'),
-                  Text(currencyFormatter.format(trx.payAmount)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Kembali:'),
-                  Text(currencyFormatter.format(trx.change)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              const Text('Terima Kasih Atas Kunjungan Anda!',
-                  style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('WARUNG BAROKAH KIARAJANGKUNG',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const Text('Kiarajangkung, Sukahening, Tasikmalaya',
+                    textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
+                const Divider(),
+                Text(
+                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
+                    style: const TextStyle(fontSize: 10)),
+                const Divider(),
+                ...trx.items.map((item) => Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${item.product.name} x${item.quantity}',
+                            style: const TextStyle(fontSize: 12)),
+                        Text(currencyFormatter.format(item.totalPrice),
+                            style: const TextStyle(fontSize: 12)),
+                      ],
+                    )),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Total:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(currencyFormatter.format(trx.total),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Bayar:'),
+                    Text(currencyFormatter.format(trx.payAmount)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Kembali:'),
+                    Text(currencyFormatter.format(trx.change)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text('Terima Kasih Atas Kunjungan Anda!',
+                    style:
+                        TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+              ],
+            ),
           ),
           actions: [
-            ElevatedButton(
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(context);
+                printReceiptViaBluetooth(trx);
+              },
+              icon: const Icon(Icons.print, size: 18),
+              label: const Text('Cetak Bluetooth'),
+            ),
+            TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Selesai'),
+              child: const Text('Tutup'),
             )
           ],
         );
@@ -482,8 +589,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           return Card(
             margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             child: ListTile(
-              title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('Harga: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock} Pcs'),
+              title: Text(prod.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(
+                  'Harga: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock} Pcs'),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -520,13 +629,23 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang')),
-            TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga (Rp)')),
-            TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok Awal')),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nama Barang')),
+            TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga (Rp)')),
+            TextField(
+                controller: stockCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stok Awal')),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () {
               if (nameCtrl.text.isNotEmpty) {
@@ -536,16 +655,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   price: double.tryParse(priceCtrl.text) ?? 0,
                   stock: int.tryParse(stockCtrl.text) ?? 0,
                 );
-
                 setState(() {
                   products.add(newProd);
                 });
-
                 addProductToGoogleSheets(newProd);
-
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Produk berhasil ditambahkan & disimpan ke Google Sheets!')),
+                  const SnackBar(
+                      content: Text(
+                          'Produk berhasil ditambahkan & disimpan ke Google Sheets!')),
                 );
               }
             },
@@ -558,8 +676,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void showEditProductDialog(Product product) {
     TextEditingController nameCtrl = TextEditingController(text: product.name);
-    TextEditingController priceCtrl = TextEditingController(text: product.price.toInt().toString());
-    TextEditingController stockCtrl = TextEditingController(text: product.stock.toString());
+    TextEditingController priceCtrl =
+        TextEditingController(text: product.price.toInt().toString());
+    TextEditingController stockCtrl =
+        TextEditingController(text: product.stock.toString());
 
     showDialog(
       context: context,
@@ -568,18 +688,29 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang')),
-            TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga (Rp)')),
-            TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok')),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nama Barang')),
+            TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga (Rp)')),
+            TextField(
+                controller: stockCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stok')),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
           ElevatedButton(
             onPressed: () {
               setState(() {
                 product.name = nameCtrl.text;
-                product.price = double.tryParse(priceCtrl.text) ?? product.price;
+                product.price =
+                    double.tryParse(priceCtrl.text) ?? product.price;
                 product.stock = int.tryParse(stockCtrl.text) ?? product.stock;
               });
               Navigator.pop(context);
@@ -603,12 +734,17 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           color: Colors.green[50],
           child: Column(
             children: [
-              const Text('Total Omset Harian:', style: TextStyle(fontSize: 14, color: Colors.black87)),
+              const Text('Total Omset Harian:',
+                  style: TextStyle(fontSize: 14, color: Colors.black87)),
               Text(
                 currencyFormatter.format(totalOmset),
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.green[800]),
+                style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.green[800]),
               ),
-              Text('${transactions.length} Transaksi Terjadi', style: const TextStyle(fontSize: 12)),
+              Text('${transactions.length} Transaksi Terjadi',
+                  style: const TextStyle(fontSize: 12)),
             ],
           ),
         ),
@@ -620,13 +756,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   itemBuilder: (context, index) {
                     final trx = transactions[transactions.length - 1 - index];
                     return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       child: ListTile(
                         title: Text('Nota #${trx.id}'),
-                        subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(trx.date)),
+                        subtitle: Text(
+                            DateFormat('dd/MM/yyyy HH:mm').format(trx.date)),
                         trailing: Text(
                           currencyFormatter.format(trx.total),
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, color: Colors.green),
                         ),
                         onTap: () => showReceiptDialog(trx),
                       ),
@@ -638,3 +777,4 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 }
+
