@@ -20,12 +20,16 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Injeksi namespace langsung saat plugin diaplikasikan (Tanpa afterEvaluate)
+// Injeksi namespace yang sesuai dengan paket manifest asli plugin
 subprojects {
     plugins.withId("com.android.library") {
         val android = extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)
-        if (android != null && android.namespace == null) {
-            android.namespace = "com.plugin.${project.name.replace("-", "_")}"
+        if (android != null) {
+            if (project.name == "blue_thermal_printer") {
+                android.namespace = "id.kakzaki.blue_thermal_printer"
+            } else if (android.namespace == null) {
+                android.namespace = "com.plugin.${project.name.replace("-", "_")}"
+            }
         }
     }
 }
