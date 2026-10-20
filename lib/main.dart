@@ -440,7 +440,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             " Terimakasih Atas Kunjungan Anda\n\n\n";
 
         await PrintBluetoothThermal.writeString(printText: PrintTextSize(size: 1, text: receiptText));
-        await PrintBluetoothThermal.disconnect();
+        await PrintBluetoothThermal.disconnect;
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Struk berhasil dicetak!')),
