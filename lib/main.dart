@@ -413,7 +413,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         return;
       }
 
-      // Pilih printer pertama yang tersanding (atau buat dialog pilihan jika ingin)
       String macAddress = devices.first.macAdress;
       bool status = await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
       
@@ -440,7 +439,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             "--------------------------------\n"
             " Terimakasih Atas Kunjungan Anda\n\n\n";
 
-        await PrintBluetoothThermal.writeString(text: receiptText);
+        await PrintBluetoothThermal.writeString(printText: PrintTextSize(size: 1, text: receiptText));
         await PrintBluetoothThermal.disconnect();
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -457,6 +456,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       );
     }
   }
+
 
   void showReceiptDialog(TransactionRecord trx) {
     showDialog(
@@ -482,7 +482,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       children: [
                         Text('${item.product.name} x${item.quantity}',
                             style: const TextStyle(fontSize: 12)),
-                        Text(currencyFormatter.format(trx.totalPrice),
+                        Text(currencyFormatter.format(item.totalPrice),
                             style: const TextStyle(fontSize: 12)),
                       ],
                     )),
