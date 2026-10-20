@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_bluetooth_printer/flutter_bluetooth_printer.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
 void main() {
   runApp(const WarungBarokahApp());
@@ -80,7 +80,6 @@ class MainHomeScreen extends StatefulWidget {
 class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
 
-  // Database Sementara / Default (akan ditimpa jika Google Sheets tersambung)
   List<Product> products = [
     Product(id: '1', name: 'Beras C4 (1 kg)', price: 14000, stock: 50),
     Product(id: '2', name: 'Minyak Goreng 1L', price: 16500, stock: 24),
@@ -104,7 +103,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     fetchProductsFromGoogleSheets();
   }
 
-  // Fungsi Ambil Data dari Google Sheets
   Future<void> fetchProductsFromGoogleSheets() async {
     final url = Uri.parse(
         'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
@@ -130,7 +128,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // Fungsi Kirim Produk Baru ke Google Sheets
   Future<void> addProductToGoogleSheets(Product newProduct) async {
     final url = Uri.parse(
         'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
@@ -163,14 +160,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Warung Barokah',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            Text(
-              'Kiarajangkung',
-              style: TextStyle(fontSize: 12, color: Colors.white70),
-            ),
+            Text('Warung Barokah',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text('Kiarajangkung',
+                style: TextStyle(fontSize: 12, color: Colors.white70)),
           ],
         ),
         backgroundColor: Colors.green[700],
@@ -195,17 +188,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         selectedItemColor: Colors.green[700],
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.shopping_cart),
-            label: 'Kasir',
-          ),
+              icon: Icon(Icons.shopping_cart), label: 'Kasir'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2),
-            label: 'Produk/Stok',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.history),
-            label: 'Riwayat',
-          ),
+              icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Riwayat'),
         ],
       ),
     );
@@ -341,7 +327,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Dialog Pembayaran
   void showPaymentDialog(double total) {
     TextEditingController payController = TextEditingController();
 
@@ -417,77 +402,62 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-    // Fungsi Cetak Bluetooth menggunakan flutter_bluetooth_printer
+  // Fungsi Cetak Bluetooth dengan print_bluetooth_thermal
   Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
     try {
-      // Menggunakan widget cetak bawaan plugin yang otomatis memunculkan pilihan printer
-      await PrintBluetooth.print(
-        builder: (context) {
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const Text('WARUNG BAROKAH KIARAJANGKUNG',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const Text('Kiarajangkung, Sukahening, Tasikmalaya',
-                  style: TextStyle(fontSize: 10)),
-              const Divider(),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
-                    style: const TextStyle(fontSize: 10)),
-              ),
-              const Divider(),
-              ...trx.items.map((item) => Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                          child: Text('${item.product.name} x${item.quantity}',
-                              style: const TextStyle(fontSize: 12))),
-                      Text(currencyFormatter.format(item.totalPrice),
-                          style: const TextStyle(fontSize: 12)),
-                    ],
-                  )),
-              const Divider(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Total:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text(currencyFormatter.format(trx.total),
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Bayar:'),
-                  Text(currencyFormatter.format(trx.payAmount)),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Kembali:'),
-                  Text(currencyFormatter.format(trx.change)),
-                ],
-              ),
-              const SizedBox(height: 10),
-              const Text('Terima Kasih Atas Kunjungan Anda!',
-                  style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-            ],
-          );
-        },
-      );
+      List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
+      if (devices.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tidak ada perangkat Bluetooth tersanding!')),
+        );
+        return;
+      }
+
+      // Pilih printer pertama yang tersanding (atau buat dialog pilihan jika ingin)
+      String macAddress = devices.first.macAdress;
+      bool status = await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
+      
+      if (status) {
+        String receiptText = 
+            "       WARUNG BAROKAH\n"
+            "       KIARAJANGKUNG\n"
+            "Sukahening, Tasikmalaya\n"
+            "--------------------------------\n"
+            "No : #${trx.id}\n"
+            "Tgl: ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\n"
+            "--------------------------------\n";
+
+        for (var item in trx.items) {
+          receiptText += "${item.product.name}\n"
+                         "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}\n";
+        }
+
+        receiptText += 
+            "--------------------------------\n"
+            "Total  : ${currencyFormatter.format(trx.total)}\n"
+            "Bayar  : ${currencyFormatter.format(trx.payAmount)}\n"
+            "Kembali: ${currencyFormatter.format(trx.change)}\n"
+            "--------------------------------\n"
+            " Terimakasih Atas Kunjungan Anda\n\n\n";
+
+        await PrintBluetoothThermal.writeString(text: receiptText);
+        await PrintBluetoothThermal.disconnect();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Struk berhasil dicetak!')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal terhubung ke printer Bluetooth!')),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal mencetak: $e')),
+        SnackBar(content: Text('Error cetak: $e')),
       );
     }
   }
 
-  // Struk / Cetak Preview
   void showReceiptDialog(TransactionRecord trx) {
     showDialog(
       context: context,
@@ -512,7 +482,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       children: [
                         Text('${item.product.name} x${item.quantity}',
                             style: const TextStyle(fontSize: 12)),
-                        Text(currencyFormatter.format(item.totalPrice),
+                        Text(currencyFormatter.format(trx.totalPrice),
                             style: const TextStyle(fontSize: 12)),
                       ],
                     )),
@@ -523,7 +493,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     const Text('Total:',
                         style: TextStyle(fontWeight: FontWeight.bold)),
                     Text(currencyFormatter.format(trx.total),
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
                 Row(
@@ -542,14 +512,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text('Terima Kasih Atas Kunjungan Anda!',
-                    style:
-                        TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
               ],
             ),
           ),
           actions: [
             ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
               onPressed: () {
                 Navigator.pop(context);
                 printReceiptViaBluetooth(trx);
