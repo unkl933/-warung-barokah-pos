@@ -25,16 +25,19 @@ class WarungBarokahApp extends StatelessWidget {
   }
 }
 
+// Model Barang / Produk dengan Kategori
 class Product {
   String id;
   String name;
-  double buyPrice;
-  double price;
+  String category;
+  double buyPrice;  
+  double price;     
   int stock;
 
   Product({
     required this.id,
     required this.name,
+    required this.category,
     required this.buyPrice,
     required this.price,
     required this.stock,
@@ -89,11 +92,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
 
   List<Product> products = [
-    Product(id: '1', name: 'Beras C4 (1 kg)', buyPrice: 12500, price: 14000, stock: 50),
-    Product(id: '2', name: 'Minyak Goreng 1L', buyPrice: 14500, price: 16500, stock: 24),
-    Product(id: '3', name: 'Gula Pasir 1 kg', buyPrice: 15500, price: 17500, stock: 30),
-    Product(id: '4', name: 'Telur Ayam 1 kg', buyPrice: 25000, price: 28000, stock: 15),
-    Product(id: '5', name: 'Mie Goreng', buyPrice: 2500, price: 3000, stock: 100),
+    Product(id: '1', name: 'Beras C4 (1 kg)', category: 'Sembako', buyPrice: 12500, price: 14000, stock: 50),
+    Product(id: '2', name: 'Minyak Goreng 1L', category: 'Sembako', buyPrice: 14500, price: 16500, stock: 24),
+    Product(id: '3', name: 'Gula Pasir 1 kg', category: 'Sembako', buyPrice: 15500, price: 17500, stock: 30),
+    Product(id: '4', name: 'Telur Ayam 1 kg', category: 'Sembako', buyPrice: 25000, price: 28000, stock: 15),
+    Product(id: '5', name: 'Mie Goreng', category: 'Makanan Ringan', buyPrice: 2500, price: 3000, stock: 100),
   ];
 
   List<CartItem> cart = [];
@@ -101,9 +104,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   TextEditingController searchKasirController = TextEditingController();
   String searchKasirQuery = '';
+  String selectedCategory = 'Semua';
 
   TextEditingController searchMasterController = TextEditingController();
   String searchMasterQuery = '';
+  String productSortOption = 'Default'; // Pilihan urutan produk
 
   final currencyFormatter = NumberFormat.currency(
     locale: 'id_ID',
@@ -130,6 +135,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 .map((item) => Product(
                       id: item['id'].toString(),
                       name: item['name'] ?? '',
+                      category: item['category'] ?? 'Umum',
                       buyPrice: (item['buyPrice'] as num?)?.toDouble() ?? 0,
                       price: (item['price'] as num?)?.toDouble() ?? 0,
                       stock: (item['stock'] as num?)?.toInt() ?? 0,
@@ -153,6 +159,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         body: json.encode({
           "id": newProduct.id,
           "name": newProduct.name,
+          "category": newProduct.category,
           "buyPrice": newProduct.buyPrice,
           "price": newProduct.price,
           "stock": newProduct.stock,
@@ -213,11 +220,25 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  List<String> getCategories() {
+    Set<String> categories = {'Semua'};
+    for (var p in products) {
+      if (p.category.isNotEmpty) {
+        categories.add(p.category);
+      }
+    }
+    return categories.toList();
+  }
+
+  // ================= 1. HALAMAN KASIR =================
   Widget buildKasirPage() {
     double subtotal = cart.fold(0, (sum, item) => sum + item.totalPrice);
+    List<String> categories = getCategories();
 
     List<Product> filteredProducts = products.where((prod) {
-      return prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+      bool matchesSearch = prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+      bool matchesCategory = selectedCategory == 'Semua' || prod.category == selectedCategory;
+      return matchesSearch && matchesCategory;
     }).toList();
 
     return Column(
@@ -253,6 +274,32 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             },
           ),
         ),
+        SizedBox(
+          height: 40,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: categories.length,
+            itemBuilder: (context, index) {
+              String cat = categories[index];
+              bool isSelected = selectedCategory == cat;
+              return Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  label: Text(cat),
+                  selected: isSelected,
+                  onSelected: (bool selected) {
+                    setState(() {
+                      selectedCategory = cat;
+                    });
+                  },
+                  selectedColor: Colors.green[200],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 4),
         Expanded(
           flex: 2,
           child: filteredProducts.isEmpty
@@ -265,7 +312,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       title: Text(prod.name,
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          'Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
+                          '${prod.category} | Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
                       trailing: ElevatedButton(
                         onPressed: prod.stock > 0
                             ? () {
@@ -694,10 +741,34 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  // ================= 2. HALAMAN MANAJEMEN PRODUK =================
   Widget buildProductManagementPage() {
+    // Hitung total penjualan tiap produk dari riwayat transaksi
+    Map<String, int> salesCount = {};
+    for (var trx in transactions) {
+      for (var item in trx.items) {
+        salesCount[item.product.id] = (salesCount[item.product.id] ?? 0) + item.quantity;
+      }
+    }
+
     List<Product> filteredMasterProducts = products.where((prod) {
       return prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
     }).toList();
+
+    // Logika Pengurutan (Sorting)
+    filteredMasterProducts.sort((a, b) {
+      if (productSortOption == 'Stok Terkecil') {
+        return a.stock.compareTo(b.stock);
+      } else if (productSortOption == 'Stok Terbesar') {
+        return b.stock.compareTo(a.stock);
+      } else if (productSortOption == 'Paling Laku') {
+        int salesA = salesCount[a.id] ?? 0;
+        int salesB = salesCount[b.id] ?? 0;
+        return salesB.compareTo(salesA); // Terlaris berada di urutan teratas
+      } else {
+        return a.name.compareTo(b.name); // Default berdasarkan abjad nama
+      }
+    });
 
     return Scaffold(
       floatingActionButton: FloatingActionButton(
@@ -709,33 +780,62 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: searchMasterController,
-              decoration: InputDecoration(
-                hintText: 'Cari stok barang...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: searchMasterQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          setState(() {
-                            searchMasterController.clear();
-                            searchMasterQuery = '';
-                          });
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: searchMasterController,
+                    decoration: InputDecoration(
+                      hintText: 'Cari stok barang...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: searchMasterQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                setState(() {
+                                  searchMasterController.clear();
+                                  searchMasterQuery = '';
+                                });
+                              },
+                            )
+                          : null,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+                    ),
+                    onChanged: (value) {
+                      setState(() {
+                        searchMasterQuery = value;
+                      });
+                    },
+                  ),
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
-              ),
-              onChanged: (value) {
-                setState(() {
-                  searchMasterQuery = value;
-                });
-              },
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: DropdownButton<String>(
+                    value: productSortOption,
+                    underline: const SizedBox(),
+                    items: const [
+                      DropdownMenuItem(value: 'Default', child: Text('Urut: Default')),
+                      DropdownMenuItem(value: 'Stok Terkecil', child: Text('Stok Terkecil')),
+                      DropdownMenuItem(value: 'Stok Terbesar', child: Text('Stok Terbesar')),
+                      DropdownMenuItem(value: 'Paling Laku', child: Text('Paling Laku')),
+                    ],
+                    onChanged: (val) {
+                      setState(() {
+                        productSortOption = val!;
+                      });
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -746,6 +846,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemBuilder: (context, index) {
                       final prod = filteredMasterProducts[index];
                       double margin = prod.price - prod.buyPrice;
+                      int totalTerjual = salesCount[prod.id] ?? 0;
 
                       return Card(
                         margin: const EdgeInsets.symmetric(
@@ -755,7 +856,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                               style: const TextStyle(
                                   fontWeight: FontWeight.bold)),
                           subtitle: Text(
-                              'Modal: ${currencyFormatter.format(prod.buyPrice)} | Jual: ${currencyFormatter.format(prod.price)}\nUntung: ${currencyFormatter.format(margin)} | Stok: ${prod.stock} Pcs'),
+                              'Kategori: ${prod.category} | Terjual: $totalTerjual Pcs\nModal: ${currencyFormatter.format(prod.buyPrice)} | Jual: ${currencyFormatter.format(prod.price)}\nUntung: ${currencyFormatter.format(margin)} | Stok: ${prod.stock} Pcs'),
+                          isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -785,6 +887,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void showAddProductDialog() {
     TextEditingController nameCtrl = TextEditingController();
+    TextEditingController categoryCtrl = TextEditingController();
     TextEditingController buyPriceCtrl = TextEditingController();
     TextEditingController priceCtrl = TextEditingController();
     TextEditingController stockCtrl = TextEditingController();
@@ -793,25 +896,30 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Tambah Produk Baru'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nama Barang')),
-            TextField(
-                controller: buyPriceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
-            TextField(
-                controller: priceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
-            TextField(
-                controller: stockCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Stok Awal')),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Nama Barang')),
+              TextField(
+                  controller: categoryCtrl,
+                  decoration: const InputDecoration(labelText: 'Kategori (Cth: Sembako)')),
+              TextField(
+                  controller: buyPriceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+              TextField(
+                  controller: priceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+              TextField(
+                  controller: stockCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Stok Awal')),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -823,6 +931,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 Product newProd = Product(
                   id: DateTime.now().millisecondsSinceEpoch.toString(),
                   name: nameCtrl.text,
+                  category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
                   buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
                   price: double.tryParse(priceCtrl.text) ?? 0,
                   stock: int.tryParse(stockCtrl.text) ?? 0,
@@ -848,6 +957,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void showEditProductDialog(Product product) {
     TextEditingController nameCtrl = TextEditingController(text: product.name);
+    TextEditingController categoryCtrl = TextEditingController(text: product.category);
     TextEditingController buyPriceCtrl =
         TextEditingController(text: product.buyPrice.toInt().toString());
     TextEditingController priceCtrl =
@@ -859,25 +969,30 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Edit Produk'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Nama Barang')),
-            TextField(
-                controller: buyPriceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
-            TextField(
-                controller: priceCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
-            TextField(
-                controller: stockCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Stok')),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Nama Barang')),
+              TextField(
+                  controller: categoryCtrl,
+                  decoration: const InputDecoration(labelText: 'Kategori')),
+              TextField(
+                  controller: buyPriceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+              TextField(
+                  controller: priceCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+              TextField(
+                  controller: stockCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Stok')),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -887,6 +1002,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             onPressed: () {
               setState(() {
                 product.name = nameCtrl.text;
+                product.category = categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text;
                 product.buyPrice =
                     double.tryParse(buyPriceCtrl.text) ?? product.buyPrice;
                 product.price =
@@ -902,6 +1018,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  // ================= 3. HALAMAN RIWAYAT & LAPORAN =================
   Widget buildHistoryPage() {
     double totalOmset = transactions.fold(0, (sum, trx) => sum + trx.total);
     double totalProfit = transactions.fold(0, (sum, trx) => sum + trx.netProfit);
