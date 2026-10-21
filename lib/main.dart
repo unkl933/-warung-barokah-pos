@@ -96,6 +96,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     symbol: 'Rp ',
     decimalDigits: 0,
   );
+  TextEditingController searchKasirController = TextEditingController();
+  String searchKasirQuery = '';
+
+  TextEditingController searchMasterController = TextEditingController();
+  String searchMasterQuery = '';
 
   @override
   void initState() {
@@ -197,44 +202,85 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 1. HALAMAN KASIR =================
+    // ================= 1. HALAMAN KASIR =================
   Widget buildKasirPage() {
     double totalBelanja = cart.fold(0, (sum, item) => sum + item.totalPrice);
 
+    // Filter daftar produk berdasarkan kata kunci pencarian
+    List<Product> filteredProducts = products.where((prod) {
+      return prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+    }).toList();
+
     return Column(
       children: [
-        Expanded(
-          flex: 2,
-          child: ListView.builder(
-            itemCount: products.length,
-            itemBuilder: (context, index) {
-              final prod = products[index];
-              return ListTile(
-                title: Text(prod.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                    '${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
-                trailing: ElevatedButton(
-                  onPressed: prod.stock > 0
-                      ? () {
-                          setState(() {
-                            int existingIndex =
-                                cart.indexWhere((c) => c.product.id == prod.id);
-                            if (existingIndex != -1) {
-                              if (cart[existingIndex].quantity < prod.stock) {
-                                cart[existingIndex].quantity++;
-                              }
-                            } else {
-                              cart.add(CartItem(product: prod, quantity: 1));
-                            }
-                          });
-                        }
-                      : null,
-                  child: const Text('Tambah'),
-                ),
-              );
+        // Kolom Pencarian Produk
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: TextField(
+            controller: searchKasirController,
+            decoration: InputDecoration(
+              hintText: 'Cari produk...',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: searchKasirQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        setState(() {
+                          searchKasirController.clear();
+                          searchKasirQuery = '';
+                        });
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+            ),
+            onChanged: (value) {
+              setState(() {
+                searchKasirQuery = value;
+              });
             },
           ),
+        ),
+        // Daftar Produk Hasil Filter
+        Expanded(
+          flex: 2,
+          child: filteredProducts.isEmpty
+              ? const Center(child: Text('Produk tidak ditemukan'))
+              : ListView.builder(
+                  itemCount: filteredProducts.length,
+                  itemBuilder: (context, index) {
+                    final prod = filteredProducts[index];
+                    return ListTile(
+                      title: Text(prod.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                          '${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
+                      trailing: ElevatedButton(
+                        onPressed: prod.stock > 0
+                            ? () {
+                                setState(() {
+                                  int existingIndex = cart.indexWhere(
+                                      (c) => c.product.id == prod.id);
+                                  if (existingIndex != -1) {
+                                    if (cart[existingIndex].quantity <
+                                        prod.stock) {
+                                      cart[existingIndex].quantity++;
+                                    }
+                                  } else {
+                                    cart.add(
+                                        CartItem(product: prod, quantity: 1));
+                                  }
+                                });
+                              }
+                            : null,
+                        child: const Text('Tambah'),
+                      ),
+                    );
+                  },
+                ),
         ),
         const Divider(thickness: 2),
         Expanded(
@@ -537,48 +583,93 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 2. HALAMAN MANAJEMEN PRODUK =================
+    // ================= 2. HALAMAN MANAJEMEN PRODUK =================
   Widget buildProductManagementPage() {
+    List<Product> filteredMasterProducts = products.where((prod) {
+      return prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
+    }).toList();
+
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.green[700],
         onPressed: () => showAddProductDialog(),
         child: const Icon(Icons.add, color: Colors.white),
       ),
-      body: ListView.builder(
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          final prod = products[index];
-          return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            child: ListTile(
-              title: Text(prod.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  'Harga: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock} Pcs'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit, color: Colors.blue),
-                    onPressed: () => showEditProductDialog(prod),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () {
-                      setState(() {
-                        products.removeAt(index);
-                      });
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: searchMasterController,
+              decoration: InputDecoration(
+                hintText: 'Cari stok barang...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: searchMasterQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            searchMasterController.clear();
+                            searchMasterQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  searchMasterQuery = value;
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: filteredMasterProducts.isEmpty
+                ? const Center(child: Text('Barang tidak ditemukan'))
+                : ListView.builder(
+                    itemCount: filteredMasterProducts.length,
+                    itemBuilder: (context, index) {
+                      final prod = filteredMasterProducts[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        child: ListTile(
+                          title: Text(prod.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                              'Harga: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock} Pcs'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => showEditProductDialog(prod),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  setState(() {
+                                    products.removeWhere((p) => p.id == prod.id);
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
                     },
                   ),
-                ],
-              ),
-            ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
+
 
   void showAddProductDialog() {
     TextEditingController nameCtrl = TextEditingController();
