@@ -25,6 +25,7 @@ class WarungBarokahApp extends StatelessWidget {
   }
 }
 
+// Model Barang / Produk
 class Product {
   String id;
   String name;
@@ -109,6 +110,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   String searchMasterQuery = '';
   String productSortOption = 'Default';
 
+  final String googleSheetUrl =
+      'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec';
+
   final currencyFormatter = NumberFormat.currency(
     locale: 'id_ID',
     symbol: 'Rp ',
@@ -122,10 +126,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   Future<void> fetchProductsFromGoogleSheets() async {
-    final url = Uri.parse(
-        'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
     try {
-      final response = await http.get(url);
+      final response = await http.get(Uri.parse(googleSheetUrl));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
         if (data.isNotEmpty) {
@@ -148,24 +150,51 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  Future<void> addProductToGoogleSheets(Product newProduct) async {
-    final url = Uri.parse(
-        'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec');
+  // Simpan/Update Produk + Kategori ke Google Sheets
+  Future<void> saveProductToGoogleSheets(Product product) async {
     try {
       await http.post(
-        url,
+        Uri.parse(googleSheetUrl),
         headers: {"Content-Type": "application/json"},
         body: json.encode({
-          "id": newProduct.id,
-          "name": newProduct.name,
-          "category": newProduct.category,
-          "buyPrice": newProduct.buyPrice,
-          "price": newProduct.price,
-          "stock": newProduct.stock,
+          "action": "saveProduct",
+          "id": product.id,
+          "name": product.name,
+          "category": product.category,
+          "buyPrice": product.buyPrice,
+          "price": product.price,
+          "stock": product.stock,
         }),
       );
     } catch (e) {
-      print("Gagal menyimpan ke Google Sheets: $e");
+      print("Gagal menyimpan produk ke Google Sheets: $e");
+    }
+  }
+
+  // Simpan Transaksi Penjualan ke Google Sheets (untuk laporan harian & bulanan)
+  Future<void> saveTransactionToGoogleSheets(TransactionRecord trx) async {
+    try {
+      String itemsSummary = trx.items
+          .map((i) => "${i.product.name} (${i.quantity}x)")
+          .join(", ");
+
+      await http.post(
+        Uri.parse(googleSheetUrl),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "action": "saveTransaction",
+          "id": trx.id,
+          "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(trx.date),
+          "subtotal": trx.subtotal,
+          "discount": trx.discount,
+          "tax": trx.tax,
+          "total": trx.total,
+          "netProfit": trx.netProfit,
+          "itemsSummary": itemsSummary,
+        }),
+      );
+    } catch (e) {
+      print("Gagal menyimpan transaksi ke Google Sheets: $e");
     }
   }
 
@@ -213,7 +242,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               icon: Icon(Icons.shopping_cart), label: 'Kasir'),
           BottomNavigationBarItem(
               icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
-          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Riwayat'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.history), label: 'Riwayat & Laporan'),
         ],
       ),
     );
@@ -235,8 +265,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     List<String> categories = getCategories();
 
     List<Product> filteredProducts = products.where((prod) {
-      bool matchesSearch = prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
-      bool matchesCategory = selectedCategory == 'Semua' || prod.category == selectedCategory;
+      bool matchesSearch =
+          prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+      bool matchesCategory =
+          selectedCategory == 'Semua' || prod.category == selectedCategory;
       return matchesSearch && matchesCategory;
     }).toList();
 
@@ -528,8 +560,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     if (bayar >= grandTotal) {
                       double kembalian = bayar - grandTotal;
 
+                      // 1. Potong stok dan update ke Google Sheets
                       for (var item in cart) {
                         item.product.stock -= item.quantity;
+                        saveProductToGoogleSheets(item.product);
                       }
 
                       TransactionRecord trx = TransactionRecord(
@@ -546,6 +580,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         payAmount: bayar,
                         change: kembalian,
                       );
+
+                      // 2. Simpan Transaksi Penjualan ke Google Sheets
+                      saveTransactionToGoogleSheets(trx);
 
                       transactions.add(trx);
                       setState(() {
@@ -745,14 +782,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     Map<String, int> salesCount = {};
     for (var trx in transactions) {
       for (var item in trx.items) {
-        salesCount[item.product.id] = (salesCount[item.product.id] ?? 0) + item.quantity;
+        salesCount[item.product.id] =
+            (salesCount[item.product.id] ?? 0) + item.quantity;
       }
     }
 
-    // Filter berdasarkan Pencarian & Filter Khusus Stok (Kosong/Menipis)
     List<Product> filteredMasterProducts = products.where((prod) {
-      bool matchesSearch = prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
-      
+      bool matchesSearch =
+          prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
+
       if (productSortOption == 'Stok Kosong') {
         return matchesSearch && prod.stock == 0;
       } else if (productSortOption == 'Stok Menipis (<5)') {
@@ -761,7 +799,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       return matchesSearch;
     }).toList();
 
-    // Logika Pengurutan (Sorting) tambahan
     filteredMasterProducts.sort((a, b) {
       if (productSortOption == 'Stok Terkecil') {
         return a.stock.compareTo(b.stock);
@@ -856,7 +893,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       double margin = prod.price - prod.buyPrice;
                       int totalTerjual = salesCount[prod.id] ?? 0;
 
-                      // Tentukan warna indikator stok
                       Color stockColor = Colors.green;
                       if (prod.stock == 0) {
                         stockColor = Colors.red;
@@ -868,7 +904,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         margin: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         child: ListTile(
-                          // Indikator Warna di bagian Kiri (Leading)
                           leading: CircleAvatar(
                             backgroundColor: stockColor,
                             child: Text(
@@ -966,7 +1001,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 setState(() {
                   products.add(newProd);
                 });
-                addProductToGoogleSheets(newProd);
+                saveProductToGoogleSheets(newProd);
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -1029,13 +1064,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             onPressed: () {
               setState(() {
                 product.name = nameCtrl.text;
-                product.category = categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text;
+                product.category =
+                    categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text;
                 product.buyPrice =
                     double.tryParse(buyPriceCtrl.text) ?? product.buyPrice;
                 product.price =
                     double.tryParse(priceCtrl.text) ?? product.price;
                 product.stock = int.tryParse(stockCtrl.text) ?? product.stock;
               });
+              saveProductToGoogleSheets(product);
               Navigator.pop(context);
             },
             child: const Text('Update'),
@@ -1045,60 +1082,172 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 3. HALAMAN RIWAYAT & LAPORAN =================
+  // ================= 3. HALAMAN RIWAYAT & LAPORAN (HARIAN & BULANAN) =================
   Widget buildHistoryPage() {
-    double totalOmset = transactions.fold(0, (sum, trx) => sum + trx.total);
-    double totalProfit = transactions.fold(0, (sum, trx) => sum + trx.netProfit);
+    DateTime now = DateTime.now();
 
-    return Column(
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          color: Colors.green[50],
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Column(
-                    children: [
-                      const Text('Total Omset:',
-                          style: TextStyle(fontSize: 12, color: Colors.black87)),
-                      Text(
-                        currencyFormatter.format(totalOmset),
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green[800]),
-                      ),
-                    ],
-                  ),
-                  Column(
-                    children: [
-                      const Text('Laba Bersih:',
-                          style: TextStyle(fontSize: 12, color: Colors.black87)),
-                      Text(
-                        currencyFormatter.format(totalProfit),
+    // Kalkulasi Penjualan Hari Ini
+    double dailyOmset = transactions
+        .where((trx) =>
+            trx.date.year == now.year &&
+            trx.date.month == now.month &&
+            trx.date.day == now.day)
+        .fold(0, (sum, trx) => sum + trx.total);
+    double dailyProfit = transactions
+        .where((trx) =>
+            trx.date.year == now.year &&
+            trx.date.month == now.month &&
+            trx.date.day == now.day)
+        .fold(0, (sum, trx) => sum + trx.netProfit);
+    int dailyCount = transactions
+        .where((trx) =>
+            trx.date.year == now.year &&
+            trx.date.month == now.month &&
+            trx.date.day == now.day)
+        .length;
+
+    // Kalkulasi Penjualan Bulan Ini
+    double monthlyOmset = transactions
+        .where((trx) =>
+            trx.date.year == now.year && trx.date.month == now.month)
+        .fold(0, (sum, trx) => sum + trx.total);
+    double monthlyProfit = transactions
+        .where((trx) =>
+            trx.date.year == now.year && trx.date.month == now.month)
+        .fold(0, (sum, trx) => sum + trx.netProfit);
+    int monthlyCount = transactions
+        .where((trx) =>
+            trx.date.year == now.year && trx.date.month == now.month)
+        .length;
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          // Kartu Rekap Hari Ini
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green[50],
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    '📅 Rekap Hari Ini (${DateFormat('dd MMM yyyy').format(now)})',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.green[900])),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        const Text('Omset Harian',
+                            style: TextStyle(fontSize: 11)),
+                        Text(currencyFormatter.format(dailyOmset),
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[800])),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        const Text('Laba Bersih',
+                            style: TextStyle(fontSize: 11)),
+                        Text(currencyFormatter.format(dailyProfit),
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Center(
+                    child: Text('$dailyCount Transaksi Berhasil',
                         style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text('${transactions.length} Transaksi Terjadi',
-                  style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
-            ],
+                            fontSize: 11, fontStyle: FontStyle.italic))),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: transactions.isEmpty
-              ? const Center(child: Text('Belum ada transaksi hari ini'))
+
+          // Kartu Rekap Bulan Ini
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    '📊 Rekap Bulan Ini (${DateFormat('MMMM yyyy', 'id_ID').format(now)})',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.blue[900])),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        const Text('Omset Bulanan',
+                            style: TextStyle(fontSize: 11)),
+                        Text(currencyFormatter.format(monthlyOmset),
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[800])),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        const Text('Laba Bersih',
+                            style: TextStyle(fontSize: 11)),
+                        Text(currencyFormatter.format(monthlyProfit),
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Center(
+                    child: Text('$monthlyCount Transaksi Berhasil',
+                        style: const TextStyle(
+                            fontSize: 11, fontStyle: FontStyle.italic))),
+              ],
+            ),
+          ),
+
+          const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Daftar Riwayat Transaksi',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            ),
+          ),
+
+          transactions.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: Center(child: Text('Belum ada transaksi tercatat')),
+                )
               : ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
                   itemCount: transactions.length,
                   itemBuilder: (context, index) {
                     final trx = transactions[transactions.length - 1 - index];
@@ -1119,8 +1268,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     );
                   },
                 ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
