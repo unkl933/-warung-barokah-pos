@@ -66,6 +66,8 @@ class TransactionRecord {
   double total;
   double payAmount;
   double change;
+  double customNetProfit;
+  String itemsSummary;
 
   TransactionRecord({
     required this.id,
@@ -77,10 +79,12 @@ class TransactionRecord {
     required this.total,
     required this.payAmount,
     required this.change,
+    this.customNetProfit = 0,
+    this.itemsSummary = '',
   });
 
   double get totalCapital => items.fold(0, (sum, item) => sum + item.totalBuyPrice);
-  double get netProfit => (subtotal - discount) - totalCapital;
+  double get netProfit => items.isNotEmpty ? ((subtotal - discount) - totalCapital) : customNetProfit;
 }
 
 class MainHomeScreen extends StatefulWidget {
@@ -117,7 +121,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
+    fetchAllDataFromGoogleSheets();
+  }
+
+  void fetchAllDataFromGoogleSheets() {
     fetchProductsFromGoogleSheets();
+    fetchTransactionsFromGoogleSheets();
   }
 
   Future<void> fetchProductsFromGoogleSheets() async {
@@ -141,7 +150,45 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         }
       }
     } catch (e) {
-      print("Gagal memuat dari Google Sheets: $e");
+      print("Gagal memuat produk dari Google Sheets: $e");
+    }
+  }
+
+  // Mengambil daftar riwayat transaksi dari Google Sheets
+  Future<void> fetchTransactionsFromGoogleSheets() async {
+    try {
+      final response = await http.get(Uri.parse('$googleSheetUrl?action=getTransactions'));
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(response.body);
+        if (data.isNotEmpty) {
+          setState(() {
+            transactions = data.map((item) {
+              DateTime parsedDate;
+              try {
+                parsedDate = DateTime.parse(item['date'].toString());
+              } catch (_) {
+                parsedDate = DateTime.now();
+              }
+
+              return TransactionRecord(
+                id: item['id'].toString(),
+                date: parsedDate,
+                items: [],
+                subtotal: (item['subtotal'] as num?)?.toDouble() ?? 0,
+                discount: (item['discount'] as num?)?.toDouble() ?? 0,
+                tax: (item['tax'] as num?)?.toDouble() ?? 0,
+                total: (item['total'] as num?)?.toDouble() ?? 0,
+                payAmount: (item['total'] as num?)?.toDouble() ?? 0,
+                change: 0,
+                customNetProfit: (item['netProfit'] as num?)?.toDouble() ?? 0,
+                itemsSummary: item['itemsSummary'] ?? '',
+              );
+            }).toList();
+          });
+        }
+      }
+    } catch (e) {
+      print("Gagal memuat transaksi dari Google Sheets: $e");
     }
   }
 
@@ -215,11 +262,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh Produk',
+            tooltip: 'Refresh Data',
             onPressed: () {
-              fetchProductsFromGoogleSheets();
+              fetchAllDataFromGoogleSheets();
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Memperbarui data produk...')),
+                const SnackBar(content: Text('Memperbarui data produk & transaksi...')),
               );
             },
           ),
@@ -684,15 +731,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
                     style: const TextStyle(fontSize: 10)),
                 const Divider(),
-                ...trx.items.map((item) => Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('${item.product.name} x${item.quantity}',
-                            style: const TextStyle(fontSize: 12)),
-                        Text(currencyFormatter.format(item.totalPrice),
-                            style: const TextStyle(fontSize: 12)),
-                      ],
-                    )),
+                if (trx.items.isNotEmpty)
+                  ...trx.items.map((item) => Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('${item.product.name} x${item.quantity}',
+                              style: const TextStyle(fontSize: 12)),
+                          Text(currencyFormatter.format(item.totalPrice),
+                              style: const TextStyle(fontSize: 12)),
+                        ],
+                      ))
+                else if (trx.itemsSummary.isNotEmpty)
+                  Text('Rincian: ${trx.itemsSummary}', style: const TextStyle(fontSize: 11)),
                 const Divider(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1241,7 +1291,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       child: ListTile(
                         title: Text('Nota #${trx.id}'),
                         subtitle: Text(
-                            '${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nProfit: ${currencyFormatter.format(trx.netProfit)}'),
+                            '${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nItem: ${trx.itemsSummary.isNotEmpty ? trx.itemsSummary : "Detail tersimpan"}'),
                         trailing: Text(
                           currencyFormatter.format(trx.total),
                           style: const TextStyle(
