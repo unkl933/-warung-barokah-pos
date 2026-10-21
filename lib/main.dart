@@ -597,7 +597,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  void showReceiptDialog(TransactionRecord trx) {
+    void showReceiptDialog(TransactionRecord trx) {
     showDialog(
       context: context,
       builder: (context) {
@@ -615,7 +615,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     style: TextStyle(fontSize: 10)),
                 const Divider(),
                 Text(
-                    'No: #${trx.id} \vert{}${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
+                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
                     style: const TextStyle(fontSize: 10)),
                 const Divider(),
                 ...trx.items.map((item) => Row(
@@ -669,3 +669,35 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   ],
                 ),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Kembali:'),
+                    Text(currencyFormatter.format(trx.change)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text('Terima Kasih Atas Kunjungan Anda!',
+                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(context);
+                printReceiptViaBluetooth(trx);
+              },
+              icon: const Icon(Icons.print, size: 18),
+              label: const Text('Cetak Bluetooth'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Tutup'),
+            ),
+          ],
+        );
+      },
+    );
+  }
