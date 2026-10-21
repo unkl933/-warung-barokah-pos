@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart'; // <-- 1. Tambahkan baris ini
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
-void main() {
+void main() async { // <-- 2. Ubah menjadi async
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('id_ID', null); // <-- 3. Tambahkan baris ini
   runApp(const WarungBarokahApp());
 }
 
