@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:intl/date_symbol_data_local.dart'; // <-- 1. Tambahkan baris ini
+import 'package:intl/date_symbol_data_local.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
-void main() async { // <-- 2. Ubah menjadi async
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('id_ID', null); // <-- 3. Tambahkan baris ini
+  await initializeDateFormatting('id_ID', null);
   runApp(const WarungBarokahApp());
 }
 
@@ -28,7 +28,6 @@ class WarungBarokahApp extends StatelessWidget {
   }
 }
 
-// Model Barang / Produk
 class Product {
   String id;
   String name;
@@ -94,14 +93,7 @@ class MainHomeScreen extends StatefulWidget {
 class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
 
-  List<Product> products = [
-    Product(id: '1', name: 'Beras C4 (1 kg)', category: 'Sembako', buyPrice: 12500, price: 14000, stock: 50),
-    Product(id: '2', name: 'Minyak Goreng 1L', category: 'Sembako', buyPrice: 14500, price: 16500, stock: 3),
-    Product(id: '3', name: 'Gula Pasir 1 kg', category: 'Sembako', buyPrice: 15500, price: 17500, stock: 0),
-    Product(id: '4', name: 'Telur Ayam 1 kg', category: 'Sembako', buyPrice: 25000, price: 28000, stock: 15),
-    Product(id: '5', name: 'Mie Goreng', category: 'Makanan Ringan', buyPrice: 2500, price: 3000, stock: 100),
-  ];
-
+  List<Product> products = [];
   List<CartItem> cart = [];
   List<TransactionRecord> transactions = [];
 
@@ -153,7 +145,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // Simpan/Update Produk + Kategori ke Google Sheets
   Future<void> saveProductToGoogleSheets(Product product) async {
     try {
       await http.post(
@@ -174,7 +165,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // Simpan Transaksi Penjualan ke Google Sheets (untuk laporan harian & bulanan)
   Future<void> saveTransactionToGoogleSheets(TransactionRecord trx) async {
     try {
       String itemsSummary = trx.items
@@ -563,7 +553,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     if (bayar >= grandTotal) {
                       double kembalian = bayar - grandTotal;
 
-                      // 1. Potong stok dan update ke Google Sheets
                       for (var item in cart) {
                         item.product.stock -= item.quantity;
                         saveProductToGoogleSheets(item.product);
@@ -584,7 +573,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         change: kembalian,
                       );
 
-                      // 2. Simpan Transaksi Penjualan ke Google Sheets
                       saveTransactionToGoogleSheets(trx);
 
                       transactions.add(trx);
@@ -1089,7 +1077,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   Widget buildHistoryPage() {
     DateTime now = DateTime.now();
 
-    // Kalkulasi Penjualan Hari Ini
     double dailyOmset = transactions
         .where((trx) =>
             trx.date.year == now.year &&
@@ -1109,7 +1096,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             trx.date.day == now.day)
         .length;
 
-    // Kalkulasi Penjualan Bulan Ini
     double monthlyOmset = transactions
         .where((trx) =>
             trx.date.year == now.year && trx.date.month == now.month)
@@ -1126,7 +1112,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     return SingleChildScrollView(
       child: Column(
         children: [
-          // Kartu Rekap Hari Ini
           Container(
             width: double.infinity,
             margin: const EdgeInsets.all(8),
@@ -1179,8 +1164,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               ],
             ),
           ),
-
-          // Kartu Rekap Bulan Ini
           Container(
             width: double.infinity,
             margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -1233,7 +1216,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               ],
             ),
           ),
-
           const Padding(
             padding: EdgeInsets.all(8.0),
             child: Align(
@@ -1242,7 +1224,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ),
-
           transactions.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(32.0),
