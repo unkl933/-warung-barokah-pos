@@ -25,12 +25,11 @@ class WarungBarokahApp extends StatelessWidget {
   }
 }
 
-// Model Barang / Produk
 class Product {
   String id;
   String name;
-  double buyPrice;  // Harga Beli / Modal
-  double price;     // Harga Jual
+  double buyPrice;
+  double price;
   int stock;
 
   Product({
@@ -42,7 +41,6 @@ class Product {
   });
 }
 
-// Model Item Keranjang
 class CartItem {
   Product product;
   int quantity;
@@ -53,7 +51,6 @@ class CartItem {
   double get totalBuyPrice => product.buyPrice * quantity;
 }
 
-// Model Transaksi
 class TransactionRecord {
   String id;
   DateTime date;
@@ -77,12 +74,10 @@ class TransactionRecord {
     required this.change,
   });
 
-  // Hitung Laba Bersih Transaksi ini
   double get totalCapital => items.fold(0, (sum, item) => sum + item.totalBuyPrice);
   double get netProfit => (subtotal - discount) - totalCapital;
 }
 
-// Master Tampilan Utama
 class MainHomeScreen extends StatefulWidget {
   const MainHomeScreen({super.key});
 
@@ -218,7 +213,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 1. HALAMAN KASIR =================
   Widget buildKasirPage() {
     double subtotal = cart.fold(0, (sum, item) => sum + item.totalPrice);
 
@@ -228,7 +222,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     return Column(
       children: [
-        // Search Bar Kasir
         Padding(
           padding: const EdgeInsets.all(8.0),
           child: TextField(
@@ -272,7 +265,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       title: Text(prod.name,
                           style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          'Jual: ${currencyFormatter.format(prod.price)} \vert{} Stok:${prod.stock}'),
+                          'Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
                       trailing: ElevatedButton(
                         onPressed: prod.stock > 0
                             ? () {
@@ -311,7 +304,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       return ListTile(
                         title: Text(item.product.name),
                         subtitle: Text(
-                            '${item.quantity} x ${currencyFormatter.format(item.product.price)} =${currencyFormatter.format(item.totalPrice)}'),
+                            '${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -532,7 +525,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Fungsi Cetak Bluetooth dengan print_bluetooth_thermal
   Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
     try {
       List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
@@ -559,7 +551,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
         for (var item in trx.items) {
           receiptText += "${item.product.name}\n"
-              "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} =${currencyFormatter.format(item.totalPrice)}\n";
+              "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}\n";
         }
 
         receiptText += "--------------------------------\n"
@@ -577,4 +569,414 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             "--------------------------------\n"
             " Terimakasih Atas Kunjungan Anda\n\n\n";
 
-        await PrintBluetoothThermal.writeString
+        await PrintBluetoothThermal.writeString(
+            printText: PrintTextSize(size: 1, text: receiptText));
+        await PrintBluetoothThermal.disconnect;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Struk berhasil dicetak!')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Gagal terhubung ke printer Bluetooth!')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error cetak: $e')),
+      );
+    }
+  }
+
+  void showReceiptDialog(TransactionRecord trx) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('WARUNG BAROKAH KIARAJANGKUNG',
+                    textAlign: TextAlign.center,
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const Text('Kiarajangkung, Sukahening, Tasikmalaya',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 10)),
+                const Divider(),
+                Text(
+                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
+                    style: const TextStyle(fontSize: 10)),
+                const Divider(),
+                ...trx.items.map((item) => Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${item.product.name} x${item.quantity}',
+                            style: const TextStyle(fontSize: 12)),
+                        Text(currencyFormatter.format(item.totalPrice),
+                            style: const TextStyle(fontSize: 12)),
+                      ],
+                    )),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Subtotal:'),
+                    Text(currencyFormatter.format(trx.subtotal)),
+                  ],
+                ),
+                if (trx.discount > 0)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Diskon:'),
+                      Text('-${currencyFormatter.format(trx.discount)}',
+                          style: const TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                if (trx.tax > 0)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('PPN:'),
+                      Text('+${currencyFormatter.format(trx.tax)}'),
+                    ],
+                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Total:',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(currencyFormatter.format(trx.total),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Bayar:'),
+                    Text(currencyFormatter.format(trx.payAmount)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Kembali:'),
+                    Text(currencyFormatter.format(trx.change)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text('Terima Kasih Atas Kunjungan Anda!',
+                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(context);
+                printReceiptViaBluetooth(trx);
+              },
+              icon: const Icon(Icons.print, size: 18),
+              label: const Text('Cetak Bluetooth'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Tutup'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget buildProductManagementPage() {
+    List<Product> filteredMasterProducts = products.where((prod) {
+      return prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
+    }).toList();
+
+    return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.green[700],
+        onPressed: () => showAddProductDialog(),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: TextField(
+              controller: searchMasterController,
+              decoration: InputDecoration(
+                hintText: 'Cari stok barang...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: searchMasterQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear),
+                        onPressed: () {
+                          setState(() {
+                            searchMasterController.clear();
+                            searchMasterQuery = '';
+                          });
+                        },
+                      )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  searchMasterQuery = value;
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: filteredMasterProducts.isEmpty
+                ? const Center(child: Text('Barang tidak ditemukan'))
+                : ListView.builder(
+                    itemCount: filteredMasterProducts.length,
+                    itemBuilder: (context, index) {
+                      final prod = filteredMasterProducts[index];
+                      double margin = prod.price - prod.buyPrice;
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        child: ListTile(
+                          title: Text(prod.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                              'Modal: ${currencyFormatter.format(prod.buyPrice)} | Jual: ${currencyFormatter.format(prod.price)}\nUntung: ${currencyFormatter.format(margin)} | Stok: ${prod.stock} Pcs'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                onPressed: () => showEditProductDialog(prod),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  setState(() {
+                                    products.removeWhere((p) => p.id == prod.id);
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void showAddProductDialog() {
+    TextEditingController nameCtrl = TextEditingController();
+    TextEditingController buyPriceCtrl = TextEditingController();
+    TextEditingController priceCtrl = TextEditingController();
+    TextEditingController stockCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tambah Produk Baru'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nama Barang')),
+            TextField(
+                controller: buyPriceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+            TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+            TextField(
+                controller: stockCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stok Awal')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () {
+              if (nameCtrl.text.isNotEmpty) {
+                Product newProd = Product(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  name: nameCtrl.text,
+                  buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
+                  price: double.tryParse(priceCtrl.text) ?? 0,
+                  stock: int.tryParse(stockCtrl.text) ?? 0,
+                );
+                setState(() {
+                  products.add(newProd);
+                });
+                addProductToGoogleSheets(newProd);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text(
+                          'Produk berhasil ditambahkan & disimpan ke Google Sheets!')),
+                );
+              }
+            },
+            child: const Text('Simpan'),
+          )
+        ],
+      ),
+    );
+  }
+
+  void showEditProductDialog(Product product) {
+    TextEditingController nameCtrl = TextEditingController(text: product.name);
+    TextEditingController buyPriceCtrl =
+        TextEditingController(text: product.buyPrice.toInt().toString());
+    TextEditingController priceCtrl =
+        TextEditingController(text: product.price.toInt().toString());
+    TextEditingController stockCtrl =
+        TextEditingController(text: product.stock.toString());
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Produk'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: 'Nama Barang')),
+            TextField(
+                controller: buyPriceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+            TextField(
+                controller: priceCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+            TextField(
+                controller: stockCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stok')),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                product.name = nameCtrl.text;
+                product.buyPrice =
+                    double.tryParse(buyPriceCtrl.text) ?? product.buyPrice;
+                product.price =
+                    double.tryParse(priceCtrl.text) ?? product.price;
+                product.stock = int.tryParse(stockCtrl.text) ?? product.stock;
+              });
+              Navigator.pop(context);
+            },
+            child: const Text('Update'),
+          )
+        ],
+      ),
+    );
+  }
+
+  Widget buildHistoryPage() {
+    double totalOmset = transactions.fold(0, (sum, trx) => sum + trx.total);
+    double totalProfit = transactions.fold(0, (sum, trx) => sum + trx.netProfit);
+
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          color: Colors.green[50],
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      const Text('Total Omset:',
+                          style: TextStyle(fontSize: 12, color: Colors.black87)),
+                      Text(
+                        currencyFormatter.format(totalOmset),
+                        style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[800]),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      const Text('Laba Bersih:',
+                          style: TextStyle(fontSize: 12, color: Colors.black87)),
+                      Text(
+                        currencyFormatter.format(totalProfit),
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text('${transactions.length} Transaksi Terjadi',
+                  style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+            ],
+          ),
+        ),
+        Expanded(
+          child: transactions.isEmpty
+              ? const Center(child: Text('Belum ada transaksi hari ini'))
+              : ListView.builder(
+                  itemCount: transactions.length,
+                  itemBuilder: (context, index) {
+                    final trx = transactions[transactions.length - 1 - index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      child: ListTile(
+                        title: Text('Nota #${trx.id}'),
+                        subtitle: Text(
+                            '${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nProfit: ${currencyFormatter.format(trx.netProfit)}'),
+                        trailing: Text(
+                          currencyFormatter.format(trx.total),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, color: Colors.green),
+                        ),
+                        onTap: () => showReceiptDialog(trx),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
