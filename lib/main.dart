@@ -32,8 +32,8 @@ class Product {
   String id;
   String name;
   String category;
-  double buyPrice;  
-  double price;     
+  double buyPrice;
+  double price;
   int stock;
 
   Product({
@@ -68,6 +68,8 @@ class TransactionRecord {
   double change;
   double customNetProfit;
   String itemsSummary;
+  String staffName;
+  String paymentType; // 'Tunai', 'Kasbon Penuh', 'Kasbon Sebagian'
 
   TransactionRecord({
     required this.id,
@@ -81,10 +83,38 @@ class TransactionRecord {
     required this.change,
     this.customNetProfit = 0,
     this.itemsSummary = '',
+    this.staffName = '-',
+    this.paymentType = 'Tunai',
   });
 
   double get totalCapital => items.fold(0, (sum, item) => sum + item.totalBuyPrice);
   double get netProfit => items.isNotEmpty ? ((subtotal - discount) - totalCapital) : customNetProfit;
+}
+
+class DebtRecord {
+  String id;
+  String customerName;
+  String staffName;
+  DateTime date;
+  double totalAmount;
+  double paidAmount;
+  double remainingAmount;
+  String status; // 'Belum Lunas', 'Lunas'
+  String itemsSummary;
+  String settlementHistory;
+
+  DebtRecord({
+    required this.id,
+    required this.customerName,
+    required this.staffName,
+    required this.date,
+    required this.totalAmount,
+    required this.paidAmount,
+    required this.remainingAmount,
+    required this.status,
+    required this.itemsSummary,
+    this.settlementHistory = '',
+  });
 }
 
 class MainHomeScreen extends StatefulWidget {
@@ -100,6 +130,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   List<Product> products = [];
   List<CartItem> cart = [];
   List<TransactionRecord> transactions = [];
+  List<DebtRecord> debts = [];
 
   TextEditingController searchKasirController = TextEditingController();
   String searchKasirQuery = '';
@@ -127,6 +158,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   void fetchAllDataFromGoogleSheets() {
     fetchProductsFromGoogleSheets();
     fetchTransactionsFromGoogleSheets();
+    fetchDebtsFromGoogleSheets();
   }
 
   Future<void> fetchProductsFromGoogleSheets() async {
@@ -150,14 +182,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         }
       }
     } catch (e) {
-      print("Gagal memuat produk dari Google Sheets: $e");
+      print("Gagal memuat produk: $e");
     }
   }
 
-  // Mengambil daftar riwayat transaksi dari Google Sheets
   Future<void> fetchTransactionsFromGoogleSheets() async {
     try {
-      final response = await http.get(Uri.parse('$googleSheetUrl?action=getTransactions'));
+      final response =
+          await http.get(Uri.parse('$googleSheetUrl?action=getTransactions'));
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
         if (data.isNotEmpty) {
@@ -182,13 +214,53 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 change: 0,
                 customNetProfit: (item['netProfit'] as num?)?.toDouble() ?? 0,
                 itemsSummary: item['itemsSummary'] ?? '',
+                staffName: item['staffName'] ?? '-',
+                paymentType: item['paymentType'] ?? 'Tunai',
               );
             }).toList();
           });
         }
       }
     } catch (e) {
-      print("Gagal memuat transaksi dari Google Sheets: $e");
+      print("Gagal memuat transaksi: $e");
+    }
+  }
+
+  Future<void> fetchDebtsFromGoogleSheets() async {
+    try {
+      final response =
+          await http.get(Uri.parse('$googleSheetUrl?action=getDebts'));
+      if (response.statusCode == 200) {
+        List<dynamic> data = json.decode(response.body);
+        if (data.isNotEmpty) {
+          setState(() {
+            debts = data.map((item) {
+              DateTime parsedDate;
+              try {
+                parsedDate = DateTime.parse(item['date'].toString());
+              } catch (_) {
+                parsedDate = DateTime.now();
+              }
+
+              return DebtRecord(
+                id: item['id'].toString(),
+                customerName: item['customerName'] ?? '-',
+                staffName: item['staffName'] ?? '-',
+                date: parsedDate,
+                totalAmount: (item['totalAmount'] as num?)?.toDouble() ?? 0,
+                paidAmount: (item['paidAmount'] as num?)?.toDouble() ?? 0,
+                remainingAmount:
+                    (item['remainingAmount'] as num?)?.toDouble() ?? 0,
+                status: item['status'] ?? 'Belum Lunas',
+                itemsSummary: item['itemsSummary'] ?? '',
+                settlementHistory: item['settlementHistory'] ?? '',
+              );
+            }).toList();
+          });
+        }
+      }
+    } catch (e) {
+      print("Gagal memuat kasbon: $e");
     }
   }
 
@@ -208,7 +280,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         }),
       );
     } catch (e) {
-      print("Gagal menyimpan produk ke Google Sheets: $e");
+      print("Gagal menyimpan produk: $e");
     }
   }
 
@@ -231,10 +303,36 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           "total": trx.total,
           "netProfit": trx.netProfit,
           "itemsSummary": itemsSummary,
+          "staffName": trx.staffName,
+          "paymentType": trx.paymentType,
         }),
       );
     } catch (e) {
-      print("Gagal menyimpan transaksi ke Google Sheets: $e");
+      print("Gagal menyimpan transaksi: $e");
+    }
+  }
+
+  Future<void> saveDebtToGoogleSheets(DebtRecord debt) async {
+    try {
+      await http.post(
+        Uri.parse(googleSheetUrl),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "action": "saveDebt",
+          "id": debt.id,
+          "customerName": debt.customerName,
+          "staffName": debt.staffName,
+          "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(debt.date),
+          "totalAmount": debt.totalAmount,
+          "paidAmount": debt.paidAmount,
+          "remainingAmount": debt.remainingAmount,
+          "status": debt.status,
+          "itemsSummary": debt.itemsSummary,
+          "settlementHistory": debt.settlementHistory,
+        }),
+      );
+    } catch (e) {
+      print("Gagal menyimpan kasbon: $e");
     }
   }
 
@@ -243,6 +341,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     final List<Widget> pages = [
       buildKasirPage(),
       buildProductManagementPage(),
+      buildDebtPage(),
       buildHistoryPage(),
     ];
 
@@ -266,7 +365,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             onPressed: () {
               fetchAllDataFromGoogleSheets();
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Memperbarui data produk & transaksi...')),
+                const SnackBar(content: Text('Memperbarui data...')),
               );
             },
           ),
@@ -277,13 +376,17 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
         selectedItemColor: Colors.green[700],
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
               icon: Icon(Icons.shopping_cart), label: 'Kasir'),
           BottomNavigationBarItem(
               icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
           BottomNavigationBarItem(
-              icon: Icon(Icons.history), label: 'Riwayat & Laporan'),
+              icon: Icon(Icons.book_online), label: 'Kasbon'),
+          BottomNavigationBarItem(
+              icon: Icon(Icons.history), label: 'Laporan'),
         ],
       ),
     );
@@ -488,9 +591,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
                 onPressed:
                     cart.isEmpty ? null : () => showPaymentDialog(subtotal),
-                child: const Text('BAYAR',
+                child: const Text('PROSES BAYAR',
                     style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               )
             ],
           ),
@@ -503,6 +606,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController discountCtrl = TextEditingController(text: '0');
     TextEditingController taxPercentCtrl = TextEditingController(text: '0');
     TextEditingController payCtrl = TextEditingController();
+    TextEditingController customerNameCtrl = TextEditingController();
+    TextEditingController staffNameCtrl = TextEditingController();
+
+    String paymentType = 'Tunai'; // 'Tunai', 'Kasbon Penuh', 'Kasbon Sebagian'
 
     showDialog(
       context: context,
@@ -513,34 +620,91 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             double taxPercent = double.tryParse(taxPercentCtrl.text) ?? 0;
             double taxAmount = (subtotal - discount) * (taxPercent / 100);
             double grandTotal = (subtotal - discount) + taxAmount;
+            double payAmount = double.tryParse(payCtrl.text) ?? 0;
+
+            if (paymentType == 'Kasbon Penuh') {
+              payAmount = 0;
+            }
+
+            double remainingDebt = paymentType != 'Tunai'
+                ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0)
+                : 0;
 
             return AlertDialog(
-              title: const Text('Pembayaran & Potongan'),
+              title: const Text('Pembayaran & Metode'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    TextField(
+                      controller: staffNameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Penjaga Warung *',
+                        prefixIcon: Icon(Icons.person),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      value: paymentType,
+                      decoration: const InputDecoration(
+                        labelText: 'Metode Pembayaran',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'Tunai', child: Text('💵 Tunai / Lunas')),
+                        DropdownMenuItem(
+                            value: 'Kasbon Penuh',
+                            child: Text('🔴 Kasbon Penuh (Rp 0)')),
+                        DropdownMenuItem(
+                            value: 'Kasbon Sebagian',
+                            child: Text('🟡 Bayar Sebagian (DP)')),
+                      ],
+                      onChanged: (val) {
+                        setDialogState(() {
+                          paymentType = val!;
+                          if (paymentType == 'Kasbon Penuh') {
+                            payCtrl.text = '0';
+                          }
+                        });
+                      },
+                    ),
+                    if (paymentType != 'Tunai') ...[
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: customerNameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Nama Pengutang / Pelanggan *',
+                          prefixIcon: Icon(Icons.badge),
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ],
+                    const Divider(height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Subtotal:'),
-                        Text(currencyFormatter.format(subtotal),
-                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(currencyFormatter.format(subtotal)),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     TextField(
                       controller: discountCtrl,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: 'Diskon / Potongan (Rp)',
+                        labelText: 'Diskon (Rp)',
                         prefixText: 'Rp ',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
                       onChanged: (val) => setDialogState(() {}),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     TextField(
                       controller: taxPercentCtrl,
                       keyboardType: TextInputType.number,
@@ -556,36 +720,50 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('PPN Nominal:'),
-                        Text(currencyFormatter.format(taxAmount)),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('TOTAL BAYAR:',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 16)),
+                        const Text('TOTAL BELANJA:',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
                         Text(
                           currencyFormatter.format(grandTotal),
                           style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 18,
+                              fontSize: 16,
                               color: Colors.green[800]),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: payCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Uang Diterima',
-                        prefixText: 'Rp ',
-                        border: OutlineInputBorder(),
+                    if (paymentType != 'Kasbon Penuh') ...[
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: payCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: paymentType == 'Kasbon Sebagian'
+                              ? 'Uang DP / Bayar Dulu'
+                              : 'Uang Diterima',
+                          prefixText: 'Rp ',
+                          border: const OutlineInputBorder(),
+                        ),
+                        onChanged: (val) => setDialogState(() {}),
                       ),
-                    ),
+                    ],
+                    if (paymentType != 'Tunai') ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        color: Colors.red[50],
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Sisa Utang:',
+                                style: TextStyle(color: Colors.red)),
+                            Text(currencyFormatter.format(remainingDebt),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red)),
+                          ],
+                        ),
+                      )
+                    ]
                   ],
                 ),
               ),
@@ -596,223 +774,95 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    double bayar = double.tryParse(payCtrl.text) ?? 0;
-                    if (bayar >= grandTotal) {
-                      double kembalian = bayar - grandTotal;
-
-                      for (var item in cart) {
-                        item.product.stock -= item.quantity;
-                        saveProductToGoogleSheets(item.product);
-                      }
-
-                      TransactionRecord trx = TransactionRecord(
-                        id: DateTime.now()
-                            .millisecondsSinceEpoch
-                            .toString()
-                            .substring(7),
-                        date: DateTime.now(),
-                        items: List.from(cart),
-                        subtotal: subtotal,
-                        discount: discount,
-                        tax: taxAmount,
-                        total: grandTotal,
-                        payAmount: bayar,
-                        change: kembalian,
-                      );
-
-                      saveTransactionToGoogleSheets(trx);
-
-                      transactions.add(trx);
-                      setState(() {
-                        cart.clear();
-                      });
-
-                      Navigator.pop(context);
-                      showReceiptDialog(trx);
-                    } else {
+                    if (staffNameCtrl.text.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                            content: Text('Uang pembayaran tidak cukup!')),
+                            content: Text('Isi Nama Penjaga Warung!')),
                       );
+                      return;
                     }
+
+                    if (paymentType != 'Tunai' &&
+                        customerNameCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text('Isi Nama Pengutang!')),
+                      );
+                      return;
+                    }
+
+                    if (paymentType == 'Tunai' && payAmount < grandTotal) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Uang bayar kurang!')),
+                      );
+                      return;
+                    }
+
+                    double kembalian =
+                        (paymentType == 'Tunai') ? payAmount - grandTotal : 0;
+
+                    for (var item in cart) {
+                      item.product.stock -= item.quantity;
+                      saveProductToGoogleSheets(item.product);
+                    }
+
+                    String summary = cart
+                        .map((i) => "${i.product.name} (${i.quantity}x)")
+                        .join(", ");
+
+                    TransactionRecord trx = TransactionRecord(
+                      id: DateTime.now()
+                          .millisecondsSinceEpoch
+                          .toString()
+                          .substring(7),
+                      date: DateTime.now(),
+                      items: List.from(cart),
+                      subtotal: subtotal,
+                      discount: discount,
+                      tax: taxAmount,
+                      total: grandTotal,
+                      payAmount: payAmount,
+                      change: kembalian,
+                      staffName: staffNameCtrl.text,
+                      paymentType: paymentType,
+                      itemsSummary: summary,
+                    );
+
+                    saveTransactionToGoogleSheets(trx);
+                    transactions.add(trx);
+
+                    if (paymentType != 'Tunai') {
+                      DebtRecord newDebt = DebtRecord(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        customerName: customerNameCtrl.text,
+                        staffName: staffNameCtrl.text,
+                        date: DateTime.now(),
+                        totalAmount: grandTotal,
+                        paidAmount: payAmount,
+                        remainingAmount: remainingDebt,
+                        status: 'Belum Lunas',
+                        itemsSummary: summary,
+                        settlementHistory: payAmount > 0
+                            ? "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: DP ${currencyFormatter.format(payAmount)} (Diterima: ${staffNameCtrl.text})\n"
+                            : "",
+                      );
+
+                      saveDebtToGoogleSheets(newDebt);
+                      debts.add(newDebt);
+                    }
+
+                    setState(() {
+                      cart.clear();
+                    });
+
+                    Navigator.pop(context);
+                    showReceiptDialog(trx);
                   },
-                  child: const Text('Proses & Struk'),
+                  child: const Text('SIMPAN & CETAK'),
                 ),
               ],
             );
           },
-        );
-      },
-    );
-  }
-
-  Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
-    try {
-      List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
-      if (devices.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Tidak ada perangkat Bluetooth tersanding!')),
-        );
-        return;
-      }
-
-      String macAddress = devices.first.macAdress;
-      bool status =
-          await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
-
-      if (status) {
-        String receiptText = "       WARUNG BAROKAH\n"
-            "       KIARAJANGKUNG\n"
-            "Sukahening, Tasikmalaya\n"
-            "--------------------------------\n"
-            "No : #${trx.id}\n"
-            "Tgl: ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\n"
-            "--------------------------------\n";
-
-        for (var item in trx.items) {
-          receiptText += "${item.product.name}\n"
-              "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}\n";
-        }
-
-        receiptText += "--------------------------------\n"
-            "Subtotal: ${currencyFormatter.format(trx.subtotal)}\n";
-        if (trx.discount > 0) {
-          receiptText +=
-              "Diskon  : -${currencyFormatter.format(trx.discount)}\n";
-        }
-        if (trx.tax > 0) {
-          receiptText += "PPN     : +${currencyFormatter.format(trx.tax)}\n";
-        }
-        receiptText += "Total   : ${currencyFormatter.format(trx.total)}\n"
-            "Bayar   : ${currencyFormatter.format(trx.payAmount)}\n"
-            "Kembali : ${currencyFormatter.format(trx.change)}\n"
-            "--------------------------------\n"
-            " Terimakasih Atas Kunjungan Anda\n\n\n";
-
-        await PrintBluetoothThermal.writeString(
-            printText: PrintTextSize(size: 1, text: receiptText));
-        await PrintBluetoothThermal.disconnect;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Struk berhasil dicetak!')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Gagal terhubung ke printer Bluetooth!')),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error cetak: $e')),
-      );
-    }
-  }
-
-  void showReceiptDialog(TransactionRecord trx) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('WARUNG BAROKAH KIARAJANGKUNG',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const Text('Kiarajangkung, Sukahening, Tasikmalaya',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 10)),
-                const Divider(),
-                Text(
-                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}',
-                    style: const TextStyle(fontSize: 10)),
-                const Divider(),
-                if (trx.items.isNotEmpty)
-                  ...trx.items.map((item) => Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('${item.product.name} x${item.quantity}',
-                              style: const TextStyle(fontSize: 12)),
-                          Text(currencyFormatter.format(item.totalPrice),
-                              style: const TextStyle(fontSize: 12)),
-                        ],
-                      ))
-                else if (trx.itemsSummary.isNotEmpty)
-                  Text('Rincian: ${trx.itemsSummary}', style: const TextStyle(fontSize: 11)),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Subtotal:'),
-                    Text(currencyFormatter.format(trx.subtotal)),
-                  ],
-                ),
-                if (trx.discount > 0)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Diskon:'),
-                      Text('-${currencyFormatter.format(trx.discount)}',
-                          style: const TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                if (trx.tax > 0)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('PPN:'),
-                      Text('+${currencyFormatter.format(trx.tax)}'),
-                    ],
-                  ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Total:',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text(currencyFormatter.format(trx.total),
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Bayar:'),
-                    Text(currencyFormatter.format(trx.payAmount)),
-                  ],
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Kembali:'),
-                    Text(currencyFormatter.format(trx.change)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Text('Terima Kasih Atas Kunjungan Anda!',
-                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-              ],
-            ),
-          ),
-          actions: [
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
-              onPressed: () {
-                Navigator.pop(context);
-                printReceiptViaBluetooth(trx);
-              },
-              icon: const Icon(Icons.print, size: 18),
-              label: const Text('Cetak Bluetooth'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Tutup'),
-            ),
-          ],
         );
       },
     );
@@ -907,12 +957,20 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     value: productSortOption,
                     underline: const SizedBox(),
                     items: const [
-                      DropdownMenuItem(value: 'Default', child: Text('Urut: Default')),
-                      DropdownMenuItem(value: 'Stok Kosong', child: Text('🔴 Stok Kosong (0)')),
-                      DropdownMenuItem(value: 'Stok Menipis (<5)', child: Text('🟡 Stok Menipis (<5)')),
-                      DropdownMenuItem(value: 'Stok Terkecil', child: Text('Stok Terkecil')),
-                      DropdownMenuItem(value: 'Stok Terbesar', child: Text('Stok Terbesar')),
-                      DropdownMenuItem(value: 'Paling Laku', child: Text('Paling Laku')),
+                      DropdownMenuItem(
+                          value: 'Default', child: Text('Urut: Default')),
+                      DropdownMenuItem(
+                          value: 'Stok Kosong',
+                          child: Text('🔴 Stok Kosong (0)')),
+                      DropdownMenuItem(
+                          value: 'Stok Menipis (<5)',
+                          child: Text('🟡 Stok Menipis (<5)')),
+                      DropdownMenuItem(
+                          value: 'Stok Terkecil', child: Text('Stok Terkecil')),
+                      DropdownMenuItem(
+                          value: 'Stok Terbesar', child: Text('Stok Terbesar')),
+                      DropdownMenuItem(
+                          value: 'Paling Laku', child: Text('Paling Laku')),
                     ],
                     onChanged: (val) {
                       setState(() {
@@ -965,11 +1023,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.edit, color: Colors.blue),
+                                icon:
+                                    const Icon(Icons.edit, color: Colors.blue),
                                 onPressed: () => showEditProductDialog(prod),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
                                 onPressed: () {
                                   setState(() {
                                     products.removeWhere((p) => p.id == prod.id);
@@ -1008,15 +1068,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   decoration: const InputDecoration(labelText: 'Nama Barang')),
               TextField(
                   controller: categoryCtrl,
-                  decoration: const InputDecoration(labelText: 'Kategori (Cth: Sembako)')),
+                  decoration: const InputDecoration(
+                      labelText: 'Kategori (Cth: Sembako)')),
               TextField(
                   controller: buyPriceCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+                  decoration: const InputDecoration(
+                      labelText: 'Harga Beli / Modal (Rp)')),
               TextField(
                   controller: priceCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+                  decoration:
+                      const InputDecoration(labelText: 'Harga Jual (Rp)')),
               TextField(
                   controller: stockCtrl,
                   keyboardType: TextInputType.number,
@@ -1034,7 +1097,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 Product newProd = Product(
                   id: DateTime.now().millisecondsSinceEpoch.toString(),
                   name: nameCtrl.text,
-                  category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
+                  category:
+                      categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
                   buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
                   price: double.tryParse(priceCtrl.text) ?? 0,
                   stock: int.tryParse(stockCtrl.text) ?? 0,
@@ -1044,11 +1108,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 });
                 saveProductToGoogleSheets(newProd);
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text(
-                          'Produk berhasil ditambahkan & disimpan ke Google Sheets!')),
-                );
               }
             },
             child: const Text('Simpan'),
@@ -1060,7 +1119,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   void showEditProductDialog(Product product) {
     TextEditingController nameCtrl = TextEditingController(text: product.name);
-    TextEditingController categoryCtrl = TextEditingController(text: product.category);
+    TextEditingController categoryCtrl =
+        TextEditingController(text: product.category);
     TextEditingController buyPriceCtrl =
         TextEditingController(text: product.buyPrice.toInt().toString());
     TextEditingController priceCtrl =
@@ -1085,11 +1145,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               TextField(
                   controller: buyPriceCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Harga Beli / Modal (Rp)')),
+                  decoration: const InputDecoration(
+                      labelText: 'Harga Beli / Modal (Rp)')),
               TextField(
                   controller: priceCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Harga Jual (Rp)')),
+                  decoration:
+                      const InputDecoration(labelText: 'Harga Jual (Rp)')),
               TextField(
                   controller: stockCtrl,
                   keyboardType: TextInputType.number,
@@ -1123,22 +1185,238 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 3. HALAMAN RIWAYAT & LAPORAN (HARIAN & BULANAN) =================
+  // ================= 3. HALAMAN KASBON & PELUNASAN =================
+  Widget buildDebtPage() {
+    double totalActiveDebts = debts
+        .where((d) => d.status != 'Lunas')
+        .fold(0, (sum, d) => sum + d.remainingAmount);
+
+    return Scaffold(
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Column(
+              children: [
+                const Text(' Total Sisa Piutang / Kasbon Belum Lunas',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const SizedBox(height: 4),
+                Text(
+                  currencyFormatter.format(totalActiveDebts),
+                  style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.red[800]),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: debts.isEmpty
+                ? const Center(child: Text('Belum ada data kasbon.'))
+                : ListView.builder(
+                    itemCount: debts.length,
+                    itemBuilder: (context, index) {
+                      final debt = debts[debts.length - 1 - index];
+                      bool isLunas = debt.status == 'Lunas';
+
+                      return Card(
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        child: ExpansionTile(
+                          leading: Icon(
+                            isLunas ? Icons.check_circle : Icons.pending_actions,
+                            color: isLunas ? Colors.green : Colors.red,
+                          ),
+                          title: Text(
+                            '${debt.customerName} (${debt.status})',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            'Sisa: ${currencyFormatter.format(debt.remainingAmount)} | Total: ${currencyFormatter.format(debt.totalAmount)}\nOleh Penjaga: ${debt.staffName} (${DateFormat('dd/MM/yy HH:mm').format(debt.date)})',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Rincian Barang: ${debt.itemsSummary}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w500)),
+                                  const SizedBox(height: 6),
+                                  if (debt.settlementHistory.isNotEmpty) ...[
+                                    const Text('Riwayat Pelunasan:',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 11)),
+                                    Text(debt.settlementHistory,
+                                        style: const TextStyle(
+                                            fontSize: 10, color: Colors.grey)),
+                                  ],
+                                  const SizedBox(height: 10),
+                                  if (!isLunas)
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      onPressed: () =>
+                                          showSettlementDialog(debt),
+                                      icon: const Icon(Icons.payment, size: 16),
+                                      label: const Text('Bayar / Pelunasan'),
+                                    )
+                                ],
+                              ),
+                            )
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void showSettlementDialog(DebtRecord debt) {
+    TextEditingController payCtrl = TextEditingController();
+    TextEditingController staffCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Pelunasan Kasbon - ${debt.customerName}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Sisa Utang Saat Ini: ${currencyFormatter.format(debt.remainingAmount)}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.red)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: staffCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Penjaga Penerima Uang *',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: payCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Jumlah Uang Dibayarkan (Rp)',
+                  prefixText: 'Rp ',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (staffCtrl.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Isi Nama Penjaga Penerima!')),
+                  );
+                  return;
+                }
+
+                double payAmount = double.tryParse(payCtrl.text) ?? 0;
+                if (payAmount <= 0) return;
+
+                setState(() {
+                  debt.paidAmount += payAmount;
+                  debt.remainingAmount -= payAmount;
+                  if (debt.remainingAmount <= 0) {
+                    debt.remainingAmount = 0;
+                    debt.status = 'Lunas';
+                  }
+
+                  String record =
+                      "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Cicil/Lunas ${currencyFormatter.format(payAmount)} (Diterima: ${staffCtrl.text})\n";
+                  debt.settlementHistory += record;
+                });
+
+                saveDebtToGoogleSheets(debt);
+
+                // Tambahkan pencatatan masuk ke Transaksi sebagai Pelunasan
+                TransactionRecord settlementTrx = TransactionRecord(
+                  id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                  date: DateTime.now(),
+                  items: [],
+                  subtotal: payAmount,
+                  discount: 0,
+                  tax: 0,
+                  total: payAmount,
+                  payAmount: payAmount,
+                  change: 0,
+                  customNetProfit: payAmount,
+                  itemsSummary: "Pelunasan Utang: ${debt.customerName}",
+                  staffName: staffCtrl.text,
+                  paymentType: 'Pelunasan Kasbon',
+                );
+
+                saveTransactionToGoogleSheets(settlementTrx);
+                transactions.add(settlementTrx);
+
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Pembayaran berhasil dicatat!')),
+                );
+              },
+              child: const Text('Simpan Pembayaran'),
+            )
+          ],
+        );
+      },
+    );
+  }
+
+  // ================= 4. HALAMAN LAPORAN (HARIAN & BULANAN) =================
   Widget buildHistoryPage() {
     DateTime now = DateTime.now();
 
-    double dailyOmset = transactions
+    // Transaksi Masuk Tunai Harian
+    double dailyOmsetCash = transactions
         .where((trx) =>
             trx.date.year == now.year &&
             trx.date.month == now.month &&
-            trx.date.day == now.day)
-        .fold(0, (sum, trx) => sum + trx.total);
+            trx.date.day == now.day &&
+            trx.paymentType != 'Kasbon Penuh')
+        .fold(0, (sum, trx) => sum + trx.payAmount);
+
+    // Kasbon Harian Baru
+    double dailyNewDebt = debts
+        .where((d) =>
+            d.date.year == now.year &&
+            d.date.month == now.month &&
+            d.date.day == now.day)
+        .fold(0, (sum, d) => sum + d.remainingAmount);
+
     double dailyProfit = transactions
         .where((trx) =>
             trx.date.year == now.year &&
             trx.date.month == now.month &&
             trx.date.day == now.day)
         .fold(0, (sum, trx) => sum + trx.netProfit);
+
     int dailyCount = transactions
         .where((trx) =>
             trx.date.year == now.year &&
@@ -1146,14 +1424,19 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             trx.date.day == now.day)
         .length;
 
-    double monthlyOmset = transactions
+    // Transaksi Bulanan
+    double monthlyOmsetCash = transactions
         .where((trx) =>
-            trx.date.year == now.year && trx.date.month == now.month)
-        .fold(0, (sum, trx) => sum + trx.total);
+            trx.date.year == now.year &&
+            trx.date.month == now.month &&
+            trx.paymentType != 'Kasbon Penuh')
+        .fold(0, (sum, trx) => sum + trx.payAmount);
+
     double monthlyProfit = transactions
         .where((trx) =>
             trx.date.year == now.year && trx.date.month == now.month)
         .fold(0, (sum, trx) => sum + trx.netProfit);
+
     int monthlyCount = transactions
         .where((trx) =>
             trx.date.year == now.year && trx.date.month == now.month)
@@ -1184,13 +1467,24 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   children: [
                     Column(
                       children: [
-                        const Text('Omset Harian',
+                        const Text('Uang Masuk Tunai',
                             style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(dailyOmset),
+                        Text(currencyFormatter.format(dailyOmsetCash),
                             style: TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.green[800])),
+                      ],
+                    ),
+                    Column(
+                      children: [
+                        const Text('Piutang Baru',
+                            style: TextStyle(fontSize: 11)),
+                        Text(currencyFormatter.format(dailyNewDebt),
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red)),
                       ],
                     ),
                     Column(
@@ -1199,16 +1493,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             style: TextStyle(fontSize: 11)),
                         Text(currencyFormatter.format(dailyProfit),
                             style: const TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blue)),
                       ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Center(
-                    child: Text('$dailyCount Transaksi Berhasil',
+                    child: Text('$dailyCount Aktivitas Transaksi',
                         style: const TextStyle(
                             fontSize: 11, fontStyle: FontStyle.italic))),
               ],
@@ -1236,11 +1530,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   children: [
                     Column(
                       children: [
-                        const Text('Omset Bulanan',
+                        const Text('Total Uang Masuk',
                             style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(monthlyOmset),
+                        Text(currencyFormatter.format(monthlyOmsetCash),
                             style: TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.green[800])),
                       ],
@@ -1251,16 +1545,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             style: TextStyle(fontSize: 11)),
                         Text(currencyFormatter.format(monthlyProfit),
                             style: const TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.blue)),
                       ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Center(
-                    child: Text('$monthlyCount Transaksi Berhasil',
+                    child: Text('$monthlyCount Transaksi Terproses',
                         style: const TextStyle(
                             fontSize: 11, fontStyle: FontStyle.italic))),
               ],
@@ -1270,14 +1564,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             padding: EdgeInsets.all(8.0),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('Daftar Riwayat Transaksi',
+              child: Text('Daftar Riwayat Penjualan',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             ),
           ),
           transactions.isEmpty
               ? const Padding(
                   padding: EdgeInsets.all(32.0),
-                  child: Center(child: Text('Belum ada transaksi tercatat')),
+                  child: Center(child: Text('Belum ada transaksi')),
                 )
               : ListView.builder(
                   shrinkWrap: true,
@@ -1289,9 +1583,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       margin: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       child: ListTile(
-                        title: Text('Nota #${trx.id}'),
+                        title: Text('Nota #${trx.id} [${trx.paymentType}]'),
                         subtitle: Text(
-                            '${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nItem: ${trx.itemsSummary.isNotEmpty ? trx.itemsSummary : "Detail tersimpan"}'),
+                            'Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)} | Penjaga: ${trx.staffName}\nItem: ${trx.itemsSummary.isNotEmpty ? trx.itemsSummary : "Detail tersimpan"}'),
                         trailing: Text(
                           currencyFormatter.format(trx.total),
                           style: const TextStyle(
@@ -1305,5 +1599,137 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         ],
       ),
     );
+  }
+
+  void showReceiptDialog(TransactionRecord trx) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('WARUNG BAROKAH KIARAJANGKUNG',
+                    textAlign: TextAlign.center,
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const Text('Kiarajangkung, Sukahening, Tasikmalaya',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 10)),
+                const Divider(),
+                Text(
+                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 10)),
+                const Divider(),
+                if (trx.items.isNotEmpty)
+                  ...trx.items.map((item) => Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('${item.product.name} x${item.quantity}',
+                              style: const TextStyle(fontSize: 12)),
+                          Text(currencyFormatter.format(item.totalPrice),
+                              style: const TextStyle(fontSize: 12)),
+                        ],
+                      ))
+                else if (trx.itemsSummary.isNotEmpty)
+                  Text('Rincian: ${trx.itemsSummary}',
+                      style: const TextStyle(fontSize: 11)),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Total Belanja:'),
+                    Text(currencyFormatter.format(trx.total),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Dibayar:'),
+                    Text(currencyFormatter.format(trx.payAmount)),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Kembali:'),
+                    Text(currencyFormatter.format(trx.change)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Text('Terima Kasih Atas Kunjungan Anda!',
+                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+              ],
+            ),
+          ),
+          actions: [
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(context);
+                printReceiptViaBluetooth(trx);
+              },
+              icon: const Icon(Icons.print, size: 18),
+              label: const Text('Cetak Bluetooth'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Tutup'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
+    try {
+      List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
+      if (devices.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Tidak ada perangkat Bluetooth tersanding!')),
+        );
+        return;
+      }
+
+      String macAddress = devices.first.macAdress;
+      bool status =
+          await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
+
+      if (status) {
+        String receiptText = "       WARUNG BAROKAH\n"
+            "       KIARAJANGKUNG\n"
+            "Sukahening, Tasikmalaya\n"
+            "--------------------------------\n"
+            "No : #${trx.id}\n"
+            "Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\n"
+            "Kasir: ${trx.staffName}\n"
+            "Tipe : ${trx.paymentType}\n"
+            "--------------------------------\n";
+
+        for (var item in trx.items) {
+          receiptText += "${item.product.name}\n"
+              "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}\n";
+        }
+
+        receiptText += "--------------------------------\n"
+            "Total   : ${currencyFormatter.format(trx.total)}\n"
+            "Bayar   : ${currencyFormatter.format(trx.payAmount)}\n"
+            "Kembali : ${currencyFormatter.format(trx.change)}\n"
+            "--------------------------------\n"
+            " Terimakasih Atas Kunjungan Anda\n\n\n";
+
+        await PrintBluetoothThermal.writeString(
+            printText: PrintTextSize(size: 1, text: receiptText));
+        await PrintBluetoothThermal.disconnect;
+      }
+    } catch (e) {
+      print("Error cetak: $e");
+    }
   }
 }
