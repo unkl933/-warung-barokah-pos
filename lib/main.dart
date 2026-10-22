@@ -393,13 +393,29 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            Text('Warung Barokah',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text('Kiarajangkung',
-                style: TextStyle(fontSize: 12, color: Colors.white70)),
+            // 🖼️ Logo Kecil di Header Utama Aplikasi
+            ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Image.asset(
+                'assets/images/logo.png',
+                width: 34,
+                height: 34,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => const Icon(Icons.store, color: Colors.white),
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Warung Barokah',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                Text('Kiarajangkung',
+                    style: TextStyle(fontSize: 12, color: Colors.white70)),
+              ],
+            ),
           ],
         ),
         backgroundColor: Colors.green[700],
@@ -1271,50 +1287,65 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   Future<void> generateAndSharePDF(String custName, List<DebtRecord> custDebts, double totalDebt) async {
     final pdf = pw.Document();
+    final ByteData logoBytes = await rootBundle.load('assets/images/logo.png');
+    final pw.MemoryImage logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
 
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
+          return pw.Stack(
             children: [
+              // 🌫️ Watermark Logo Opacity Rendah di Latar Belakang PDF
               pw.Center(
-                child: pw.Column(
-                  children: [
-                    pw.Text('WARUNG BAROKAH KIARAJANGKUNG', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Sukahening, Tasikmalaya | Struk Piutang / Kasbon', style: const pw.TextStyle(fontSize: 10)),
-                    pw.Divider(thickness: 1),
-                  ],
+                child: pw.Opacity(
+                  opacity: 0.08,
+                  child: pw.Image(logoImage, width: 320, height: 320),
                 ),
               ),
-              pw.SizedBox(height: 10),
-              pw.Text('Rincian Piutang / Kasbon Pelanggan:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
-              pw.Text('Nama Pelanggan: $custName', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-              pw.Text('Tanggal Cetak  : ${DateFormat('dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now())}', style: const pw.TextStyle(fontSize: 10)),
-              pw.SizedBox(height: 12),
-              pw.Table.fromTextArray(
-                headers: ['Tanggal', 'Kasir', 'Rincian Barang', 'Total', 'Sisa Utang'],
-                data: custDebts.map((d) => [
-                  DateFormat('dd/MM/yy HH:mm').format(d.date),
-                  d.staffName,
-                  d.itemsSummary,
-                  currencyFormatter.format(d.totalAmount),
-                  currencyFormatter.format(d.remainingAmount),
-                ]).toList(),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
-                cellStyle: const pw.TextStyle(fontSize: 9),
-              ),
-              pw.Divider(),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('TOTAL SISA PIUTANG:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
-                  pw.Text(currencyFormatter.format(totalDebt), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.red)),
+                  pw.Center(
+                    child: pw.Column(
+                      children: [
+                        pw.Image(logoImage, width: 50, height: 50),
+                        pw.SizedBox(height: 4),
+                        pw.Text('WARUNG BAROKAH KIARAJANGKUNG', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                        pw.Text('Sukahening, Tasikmalaya | Struk Piutang / Kasbon', style: const pw.TextStyle(fontSize: 10)),
+                        pw.Divider(thickness: 1),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(height: 10),
+                  pw.Text('Rincian Piutang / Kasbon Pelanggan:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                  pw.Text('Nama Pelanggan: $custName', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('Tanggal Cetak  : ${DateFormat('dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now())}', style: const pw.TextStyle(fontSize: 10)),
+                  pw.SizedBox(height: 12),
+                  pw.Table.fromTextArray(
+                    headers: ['Tanggal', 'Kasir', 'Rincian Barang', 'Total', 'Sisa Utang'],
+                    data: custDebts.map((d) => [
+                      DateFormat('dd/MM/yy HH:mm').format(d.date),
+                      d.staffName,
+                      d.itemsSummary,
+                      currencyFormatter.format(d.totalAmount),
+                      currencyFormatter.format(d.remainingAmount),
+                    ]).toList(),
+                    headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+                    cellStyle: const pw.TextStyle(fontSize: 9),
+                  ),
+                  pw.Divider(),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('TOTAL SISA PIUTANG:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                      pw.Text(currencyFormatter.format(totalDebt), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.red)),
+                    ],
+                  ),
+                  pw.SizedBox(height: 20),
+                  pw.Center(child: pw.Text('Terima Kasih Atas Kepercayaannya!', style: pw.TextStyle(fontStyle: pw.FontStyle.italic, fontSize: 10))),
                 ],
               ),
-              pw.SizedBox(height: 20),
-              pw.Center(child: pw.Text('Terima Kasih Atas Kepercayaannya!', style: pw.TextStyle(fontStyle: pw.FontStyle.italic, fontSize: 10))),
             ],
           );
         },
@@ -1324,66 +1355,80 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'Nota_Piutang_$custName.pdf');
   }
 
-  // Generator Struk PDF per Transaksi
   Future<void> generateAndShareTransactionPDF(TransactionRecord trx) async {
     final pdf = pw.Document();
+    final ByteData logoBytes = await rootBundle.load('assets/images/logo.png');
+    final pw.MemoryImage logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
 
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.roll80,
         build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
+          return pw.Stack(
             children: [
+              // 🌫️ Watermark Logo Opacity Rendah di Struk Roll PDF
               pw.Center(
-                child: pw.Column(
-                  children: [
-                    pw.Text('WARUNG BAROKAH', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('KIARAJANGKUNG', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Sukahening, Tasikmalaya', style: const pw.TextStyle(fontSize: 8)),
-                    pw.Divider(thickness: 1),
-                  ],
+                child: pw.Opacity(
+                  opacity: 0.10,
+                  child: pw.Image(logoImage, width: 180, height: 180),
                 ),
               ),
-              pw.Text('No Nota : #${trx.id}', style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('Tanggal : ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}', style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('Kasir   : ${trx.staffName}', style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('Metode  : ${trx.paymentType}', style: const pw.TextStyle(fontSize: 8)),
-              pw.Divider(thickness: 0.5),
-              if (trx.items.isNotEmpty)
-                ...trx.items.map((item) => pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Center(
+                    child: pw.Column(
                       children: [
-                        pw.Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const pw.TextStyle(fontSize: 8)),
-                        pw.Text(currencyFormatter.format(item.totalPrice), style: const pw.TextStyle(fontSize: 8)),
+                        pw.Image(logoImage, width: 40, height: 40),
+                        pw.SizedBox(height: 2),
+                        pw.Text('WARUNG BAROKAH', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                        pw.Text('KIARAJANGKUNG', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                        pw.Text('Sukahening, Tasikmalaya', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Divider(thickness: 1),
                       ],
-                    ))
-              else
-                pw.Text('Items: ${trx.itemsSummary}', style: const pw.TextStyle(fontSize: 8)),
-              pw.Divider(thickness: 0.5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Total Belanja:', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                  pw.Text(currencyFormatter.format(trx.total), style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                  ),
+                  pw.Text('No Nota : #${trx.id}', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('Tanggal : ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('Kasir   : ${trx.staffName}', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text('Metode  : ${trx.paymentType}', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Divider(thickness: 0.5),
+                  if (trx.items.isNotEmpty)
+                    ...trx.items.map((item) => pw.Row(
+                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                          children: [
+                            pw.Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const pw.TextStyle(fontSize: 8)),
+                            pw.Text(currencyFormatter.format(item.totalPrice), style: const pw.TextStyle(fontSize: 8)),
+                          ],
+                        ))
+                  else
+                    pw.Text('Items: ${trx.itemsSummary}', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Divider(thickness: 0.5),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('Total Belanja:', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                      pw.Text(currencyFormatter.format(trx.total), style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ],
+                  ),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('Bayar:', style: const pw.TextStyle(fontSize: 8)),
+                      pw.Text(currencyFormatter.format(trx.payAmount), style: const pw.TextStyle(fontSize: 8)),
+                    ],
+                  ),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('Kembali:', style: const pw.TextStyle(fontSize: 8)),
+                      pw.Text(currencyFormatter.format(trx.change), style: const pw.TextStyle(fontSize: 8)),
+                    ],
+                  ),
+                  pw.SizedBox(height: 10),
+                  pw.Center(child: pw.Text('Terima Kasih Atas Kunjungan Anda!', style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic))),
                 ],
               ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Bayar:', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text(currencyFormatter.format(trx.payAmount), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('Kembali:', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text(currencyFormatter.format(trx.change), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-              pw.SizedBox(height: 10),
-              pw.Center(child: pw.Text('Terima Kasih Atas Kunjungan Anda!', style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic))),
             ],
           );
         },
@@ -1486,33 +1531,48 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('WARUNG BAROKAH KIARAJANGKUNG', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const Text('Kiarajangkung, Sukahening, Tasikmalaya', textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
-              const Divider(),
-              Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nKasir: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
-              const Divider(),
-              if (trx.items.isNotEmpty)
-                ...trx.items.map((item) => Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const TextStyle(fontSize: 12)),
-                        Text(currencyFormatter.format(item.totalPrice), style: const TextStyle(fontSize: 12)),
-                      ],
-                    ))
-              else
-                Text('Rincian: ${trx.itemsSummary}', style: const TextStyle(fontSize: 11)),
-              const Divider(),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total:'), Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold))]),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Bayar:'), Text(currencyFormatter.format(trx.payAmount))]),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Kembali:'), Text(currencyFormatter.format(trx.change))]),
-              const SizedBox(height: 10),
-              const Text('Terima Kasih!', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-            ],
-          ),
+        content: Stack(
+          children: [
+            Positioned.fill(
+              child: Opacity(
+                opacity: 0.08,
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset('assets/images/logo.png', width: 45, height: 45),
+                  const SizedBox(height: 4),
+                  const Text('WARUNG BAROKAH KIARAJANGKUNG', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const Text('Kiarajangkung, Sukahening, Tasikmalaya', textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
+                  const Divider(),
+                  Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nKasir: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
+                  const Divider(),
+                  if (trx.items.isNotEmpty)
+                    ...trx.items.map((item) => Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const TextStyle(fontSize: 12)),
+                            Text(currencyFormatter.format(item.totalPrice), style: const TextStyle(fontSize: 12)),
+                          ],
+                        ))
+                  else
+                    Text('Rincian: ${trx.itemsSummary}', style: const TextStyle(fontSize: 11)),
+                  const Divider(),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total:'), Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold))]),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Bayar:'), Text(currencyFormatter.format(trx.payAmount))]),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Kembali:'), Text(currencyFormatter.format(trx.change))]),
+                  const SizedBox(height: 10),
+                  const Text('Terima Kasih!', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
           ElevatedButton.icon(
