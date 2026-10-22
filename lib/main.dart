@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -173,6 +174,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   TextEditingController searchMasterController = TextEditingController();
   String searchMasterQuery = '';
   String productSortOption = 'Default';
+
+  final AudioPlayer audioPlayer = AudioPlayer();
 
   final String googleSheetUrl =
       'https://script.google.com/macros/s/AKfycbx0Vw5ldIELsmoXzTNiW9VBeLYeNxaJ15CaX9IhnjBPIWqdxIVJSYN8lUPjMMjyOiet/exec';
@@ -627,18 +630,20 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  void processScannedBarcode(String code) {
+  void processScannedBarcode(String code) async {
     try {
       final matchingProduct = products.firstWhere(
         (p) => p.barcode == code || p.id == code,
       );
 
-      SystemSound.play(SystemSoundType.click);
+      // 🔊 Play Nada Bip Sukses Nyaring
+      await audioPlayer.play(UrlSource('https://actions.google.com/sounds/v1/submarines/sonar_ping.ogg'));
       HapticFeedback.mediumImpact();
 
       handleAddToCart(matchingProduct);
     } catch (_) {
-      SystemSound.play(SystemSoundType.alert);
+      // ⚠️ Play Nada Peringatan Barcode Tidak Terdaftar
+      await audioPlayer.play(UrlSource('https://actions.google.com/sounds/v1/alarms/beep_short.ogg'));
       HapticFeedback.vibrate();
 
       ScaffoldMessenger.of(context).showSnackBar(
