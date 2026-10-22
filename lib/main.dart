@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -631,10 +632,30 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       final matchingProduct = products.firstWhere(
         (p) => p.barcode == code || p.id == code,
       );
+
+      // 🔊 Play Suara Bip Sukses (Volume Rendah / Singkat)
+      FlutterRingtonePlayer.playNotification(volume: 0.2);
+
       handleAddToCart(matchingProduct);
     } catch (_) {
+      // ⚠️ Play Suara Peringatan Barcode Tidak Terdaftar
+      FlutterRingtonePlayer.playAlarm(volume: 0.5);
+
+      // Tampilkan SnackBar dengan Tombol Panggil "Tambah Produk Baru"
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Produk dengan barcode "$code" tidak ditemukan!')),
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text('Barcode "$code" belum terdaftar!'),
+          action: SnackBarAction(
+            label: '+ Tambah Produk',
+            textColor: Colors.amberAccent,
+            onPressed: () {
+              // Berpindah ke tab manajemen produk dan buka dialog tambah
+              setState(() => _currentIndex = 1);
+              showProductDialog(null, initialBarcode: code);
+            },
+          ),
+        ),
       );
     }
   }
@@ -957,14 +978,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  void showProductDialog(Product? product) {
+  void showProductDialog(Product? product, {String? initialBarcode}) {
     bool isEdit = product != null;
     TextEditingController nameCtrl = TextEditingController(text: isEdit ? product.name : '');
     TextEditingController categoryCtrl = TextEditingController(text: isEdit ? product.category : '');
     TextEditingController buyPriceCtrl = TextEditingController(text: isEdit ? product.buyPrice.toInt().toString() : '');
     TextEditingController priceCtrl = TextEditingController(text: isEdit ? product.price.toInt().toString() : '');
     TextEditingController stockCtrl = TextEditingController(text: isEdit ? product.stock.toString() : '');
-    TextEditingController barcodeCtrl = TextEditingController(text: isEdit ? product.barcode : '');
+    TextEditingController barcodeCtrl = TextEditingController(
+      text: isEdit ? product.barcode : (initialBarcode ?? ''),
+    );
     
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
     TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
@@ -1331,7 +1354,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 }
 
-// Widget Layar Kamera Pemindai Barcode
 class BarcodeScannerScreen extends StatelessWidget {
   const BarcodeScannerScreen({super.key});
 

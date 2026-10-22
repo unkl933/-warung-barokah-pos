@@ -38,6 +38,7 @@ dependencies:
   print_bluetooth_thermal: ^1.2.5
   mobile_scanner: ^5.1.1
   http: ^1.2.0  # Tambahkan package ini untuk mengambil data
+  flutter_ringtone_player: ^3.2.0
 
 dev_dependencies:
   flutter_test:
