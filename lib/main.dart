@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,14 +33,13 @@ class Product {
   String id;
   String name;
   String category;
-  double buyPrice; // Harga beli per unit utama
-  double price;    // Harga jual per unit utama (Bungkus/Kg)
-  int stock;       // Disimpan dalam satuan terkecil (Batang / Gram)
-  
-  // Fitur Eceran
-  String retailName;       // Cth: "Batang", "Gram", "Pcs"
-  int retailConversion;    // Cth: 1 bungkus = 12 batang (isi 12), atau 1 kg = 1000 gram
-  double retailPrice;      // Harga jual per satuan eceran
+  double buyPrice;
+  double price;
+  int stock;
+  String retailName;
+  int retailConversion;
+  double retailPrice;
+  String barcode;
 
   Product({
     required this.id,
@@ -51,11 +51,11 @@ class Product {
     this.retailName = '',
     this.retailConversion = 1,
     this.retailPrice = 0,
+    this.barcode = '',
   });
 
   bool get hasRetail => retailName.isNotEmpty && retailConversion > 1 && retailPrice > 0;
 
-  // Format tampilan stok agar mudah dibaca (Misal: 58 batang -> 4 Bungkus 10 Batang)
   String getFormattedStock() {
     if (!hasRetail) return '$stock Pcs';
     int mainUnit = stock ~/ retailConversion;
@@ -69,15 +69,14 @@ class Product {
 
 class CartItem {
   Product product;
-  int quantity; // Jumlah dalam satuan yang dibeli (bisa satuan utama atau eceran)
-  bool isRetail; // True jika dibeli secara eceran
+  int quantity;
+  bool isRetail;
 
   CartItem({required this.product, required this.quantity, this.isRetail = false});
 
   double get unitPrice => isRetail ? product.retailPrice : product.price;
   double get totalPrice => unitPrice * quantity;
   
-  // Total modal proporsional
   double get totalBuyPrice {
     if (isRetail) {
       double buyPerSmallUnit = product.buyPrice / product.retailConversion;
@@ -87,7 +86,6 @@ class CartItem {
     }
   }
 
-  // Berapa banyak stok terkecil yang dipotong
   int get stockDeduction => isRetail ? quantity : (quantity * product.retailConversion);
 }
 
@@ -214,6 +212,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       retailName: item['retailName'] ?? '',
                       retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
                       retailPrice: (item['retailPrice'] as num?)?.toDouble() ?? 0,
+                      barcode: item['barcode'] ?? '',
                     ))
                 .toList();
           });
@@ -316,6 +315,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           "retailName": product.retailName,
           "retailConversion": product.retailConversion,
           "retailPrice": product.retailPrice,
+          "barcode": product.barcode,
         }),
       );
     } catch (e) {
@@ -441,7 +441,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     List<String> categories = getCategories();
 
     List<Product> filteredProducts = products.where((prod) {
-      bool matchesSearch = prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+      bool matchesSearch = prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase()) ||
+          prod.barcode.toLowerCase().contains(searchKasirQuery.toLowerCase());
       bool matchesCategory = selectedCategory == 'Semua' || prod.category == selectedCategory;
       return matchesSearch && matchesCategory;
     }).toList();
@@ -450,26 +451,52 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.all(8.0),
-          child: TextField(
-            controller: searchKasirController,
-            decoration: InputDecoration(
-              hintText: 'Cari produk...',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: searchKasirQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        setState(() {
-                          searchKasirController.clear();
-                          searchKasirQuery = '';
-                        });
-                      },
-                    )
-                  : null,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
-            ),
-            onChanged: (value) => setState(() => searchKasirQuery = value),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: searchKasirController,
+                  decoration: InputDecoration(
+                    hintText: 'Cari produk / barcode...',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: searchKasirQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              setState(() {
+                                searchKasirController.clear();
+                                searchKasirQuery = '';
+                              });
+                            },
+                          )
+                        : null,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+                  ),
+                  onChanged: (value) => setState(() => searchKasirQuery = value),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green[700],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () async {
+                  final scannedCode = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
+                  );
+                  if (scannedCode != null && scannedCode.toString().isNotEmpty) {
+                    processScannedBarcode(scannedCode.toString());
+                  }
+                },
+                icon: const Icon(Icons.qr_code_scanner, size: 20),
+                label: const Text('Scan'),
+              ),
+            ],
           ),
         ),
         SizedBox(
@@ -550,9 +577,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                               icon: const Icon(Icons.add_circle, color: Colors.green),
                               onPressed: () {
                                 setState(() {
-                                  int maxStock = item.product.stock;
                                   int currentDeduction = item.isRetail ? (item.quantity + 1) : ((item.quantity + 1) * item.product.retailConversion);
-                                  if (!item.isRetail && currentDeduction <= maxStock || item.isRetail && currentDeduction <= maxStock) {
+                                  if (currentDeduction <= item.product.stock) {
                                     item.quantity++;
                                   } else {
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -600,10 +626,21 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Dialog pilih satuan jika produk punya eceran
+  void processScannedBarcode(String code) {
+    try {
+      final matchingProduct = products.firstWhere(
+        (p) => p.barcode == code || p.id == code,
+      );
+      handleAddToCart(matchingProduct);
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Produk dengan barcode "$code" tidak ditemukan!')),
+      );
+    }
+  }
+
   void handleAddToCart(Product prod) {
     if (!prod.hasRetail) {
-      // Masukkan langsung 1 unit utama
       addItemToCart(prod, 1, false);
       return;
     }
@@ -617,7 +654,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.inventory, color: Colors.green),
-              title: const Text('Satuan Utama (Bungkus/Kg)'),
+              title: const Text('Satuan Utama'),
               subtitle: Text('Harga: ${currencyFormatter.format(prod.price)}'),
               onTap: () {
                 Navigator.pop(context);
@@ -643,8 +680,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   void addItemToCart(Product prod, int qty, bool isRetail) {
     setState(() {
       int requiredStock = isRetail ? qty : (qty * prod.retailConversion);
-      
-      // Cek apakah sudah ada item serupa di keranjang
       int existingIndex = cart.indexWhere((c) => c.product.id == prod.id && c.isRetail == isRetail);
       
       if (existingIndex != -1) {
@@ -759,7 +794,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
                     double kembalian = (paymentType == 'Tunai') ? payAmount - grandTotal : 0;
 
-                    // Potong stok berdasarkan satuan terkecil
                     for (var item in cart) {
                       item.product.stock -= item.stockDeduction;
                       saveProductToGoogleSheets(item.product);
@@ -816,7 +850,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 2. HALAMAN MANAJEMEN PRODUK & ECERAN =================
+  // ================= 2. HALAMAN MANAJEMEN PRODUK & BARCODE =================
   Widget buildProductManagementPage() {
     Map<String, int> salesCount = {};
     for (var trx in transactions) {
@@ -826,7 +860,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
 
     List<Product> filteredMasterProducts = products.where((prod) {
-      bool matchesSearch = prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
+      bool matchesSearch = prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase()) ||
+          prod.barcode.toLowerCase().contains(searchMasterQuery.toLowerCase());
       if (productSortOption == 'Stok Kosong') return matchesSearch && prod.stock == 0;
       if (productSortOption == 'Stok Menipis') return matchesSearch && prod.stock > 0 && prod.stock < (prod.retailConversion > 1 ? prod.retailConversion : 5);
       return matchesSearch;
@@ -855,7 +890,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   child: TextField(
                     controller: searchMasterController,
                     decoration: InputDecoration(
-                      hintText: 'Cari stok barang...',
+                      hintText: 'Cari stok / barcode...',
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: searchMasterQuery.isNotEmpty ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() { searchMasterController.clear(); searchMasterQuery = ''; })) : null,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -903,7 +938,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           ),
                           title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: Text(
-                              'Kategori: ${prod.category} | Jual: ${currencyFormatter.format(prod.price)}\nStok: ${prod.getFormattedStock()}${prod.hasRetail ? ' | Eceran: ${prod.retailName} (${currencyFormatter.format(prod.retailPrice)})' : ''}'),
+                              'Kategori: ${prod.category} | Barcode: ${prod.barcode.isNotEmpty ? prod.barcode : "-"}\nStok: ${prod.getFormattedStock()}${prod.hasRetail ? ' | Eceran: ${prod.retailName}' : ''}'),
                           isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -922,7 +957,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Dialog Tambah/Edit Produk lengkap dengan opsi Eceran
   void showProductDialog(Product? product) {
     bool isEdit = product != null;
     TextEditingController nameCtrl = TextEditingController(text: isEdit ? product.name : '');
@@ -930,6 +964,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController buyPriceCtrl = TextEditingController(text: isEdit ? product.buyPrice.toInt().toString() : '');
     TextEditingController priceCtrl = TextEditingController(text: isEdit ? product.price.toInt().toString() : '');
     TextEditingController stockCtrl = TextEditingController(text: isEdit ? product.stock.toString() : '');
+    TextEditingController barcodeCtrl = TextEditingController(text: isEdit ? product.barcode : '');
     
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
     TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
@@ -938,21 +973,39 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(isEdit ? 'Edit Produk & Eceran' : 'Tambah Produk Baru'),
+        title: Text(isEdit ? 'Edit Produk & Barcode' : 'Tambah Produk Baru'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang *')),
-              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Kategori (Cth: Rokok / Sembako)')),
+              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Kategori')),
+              Row(
+                children: [
+                  Expanded(child: TextField(controller: barcodeCtrl, decoration: const InputDecoration(labelText: 'Kode Barcode'))),
+                  IconButton(
+                    icon: const Icon(Icons.camera_alt, color: Colors.green),
+                    tooltip: 'Scan Barcode',
+                    onPressed: () async {
+                      final scanned = await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
+                      );
+                      if (scanned != null) {
+                        barcodeCtrl.text = scanned.toString();
+                      }
+                    },
+                  ),
+                ],
+              ),
               TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal Satuan Utama (Rp)')),
               TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Satuan Utama (Rp)')),
-              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok (Dalam Satuan Terkecil/Batang/Gram)')),
+              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok (Satuan Terkecil)')),
               const Divider(height: 20),
-              const Text('--- PENGATURAN ECERAN (Opsional) ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-              TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang / Gram)')),
-              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Satuan Utama (Cth: 12 Batang / 1000 Gram)')),
-              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual per Satuan Eceran (Rp)')),
+              const Text('--- PENGATURAN ECERAN ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+              TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang)')),
+              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Utama (Cth: 12)')),
+              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Eceran (Rp)')),
             ],
           ),
         ),
@@ -971,6 +1024,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   retailName: retailNameCtrl.text,
                   retailConversion: int.tryParse(retailConvCtrl.text) ?? 1,
                   retailPrice: double.tryParse(retailPriceCtrl.text) ?? 0,
+                  barcode: barcodeCtrl.text,
                 );
                 setState(() {
                   if (isEdit) {
@@ -1274,5 +1328,32 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     } catch (e) {
       print("Error cetak: $e");
     }
+  }
+}
+
+// Widget Layar Kamera Pemindai Barcode
+class BarcodeScannerScreen extends StatelessWidget {
+  const BarcodeScannerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan Barcode Produk'),
+        backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
+      ),
+      body: MobileScanner(
+        onDetect: (capture) {
+          final List<Barcode> barcodes = capture.barcodes;
+          for (final barcode in barcodes) {
+            if (barcode.rawValue != null) {
+              Navigator.pop(context, barcode.rawValue);
+              break;
+            }
+          }
+        },
+      ),
+    );
   }
 }
