@@ -754,7 +754,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   children: [
                     TextField(
                       controller: staffNameCtrl,
-                      decoration: const InputDecoration(labelText: 'Nama Penjaga Warung *', prefixIcon: Icon(Icons.person), border: OutlineInputBorder(), isDense: true),
+                      decoration: const InputDecoration(labelText: 'Nama Kasir *', prefixIcon: Icon(Icons.person), border: OutlineInputBorder(), isDense: true),
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
@@ -805,7 +805,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ElevatedButton(
                   onPressed: () {
                     if (staffNameCtrl.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Penjaga Warung!')));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Kasir!')));
                       return;
                     }
                     if (paymentType != 'Tunai' && customerNameCtrl.text.isEmpty) {
@@ -865,7 +865,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     Navigator.pop(context);
                     showReceiptDialog(trx);
                   },
-                  child: const Text('SIMPAN & CETAK'),
+                  child: const Text('SIMPAN & NOTA'),
                 ),
               ],
             );
@@ -1075,7 +1075,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   // ================= 3. HALAMAN KASBON / PIUTANG KELOMPOK =================
   Widget buildDebtPage() {
-    // Pengelompokan Piutang berdasarkan Nama Pelanggan
     Map<String, List<DebtRecord>> groupedDebts = {};
     for (var d in debts) {
       String nameKey = d.customerName.trim().toUpperCase();
@@ -1148,7 +1147,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                                                 Text(d.status, style: TextStyle(color: d.status == 'Lunas' ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 11)),
                                               ],
                                             ),
-                                            Text('Penjaga: ${d.staffName}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                            Text('Kasir: ${d.staffName}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
                                             const Divider(height: 12),
                                             Text('Barang:\n${d.itemsSummary}', style: const TextStyle(fontSize: 12)),
                                             const SizedBox(height: 6),
@@ -1208,7 +1207,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           children: [
             Text('Total Sisa Utang: ${currencyFormatter.format(totalDebt)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
             const SizedBox(height: 12),
-            TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Penjaga Penerima *', border: OutlineInputBorder(), isDense: true)),
+            TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Kasir Penerima *', border: OutlineInputBorder(), isDense: true)),
             const SizedBox(height: 8),
             TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Pembayaran (Rp)', prefixText: 'Rp ', border: OutlineInputBorder())),
           ],
@@ -1270,7 +1269,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // Fungsi Pembuat PDF Nota dan Piutang
   Future<void> generateAndSharePDF(String custName, List<DebtRecord> custDebts, double totalDebt) async {
     final pdf = pw.Document();
 
@@ -1285,7 +1283,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 child: pw.Column(
                   children: [
                     pw.Text('WARUNG BAROKAH KIARAJANGKUNG', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Sukahening, Tasikmalaya | Telp/WA: 08xx-xxxx-xxxx', style: const pw.TextStyle(fontSize: 10)),
+                    pw.Text('Sukahening, Tasikmalaya | Struk Piutang / Kasbon', style: const pw.TextStyle(fontSize: 10)),
                     pw.Divider(thickness: 1),
                   ],
                 ),
@@ -1296,7 +1294,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               pw.Text('Tanggal Cetak  : ${DateFormat('dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now())}', style: const pw.TextStyle(fontSize: 10)),
               pw.SizedBox(height: 12),
               pw.Table.fromTextArray(
-                headers: ['Tanggal', 'Penjaga', 'Rincian Barang', 'Total', 'Sisa Utang'],
+                headers: ['Tanggal', 'Kasir', 'Rincian Barang', 'Total', 'Sisa Utang'],
                 data: custDebts.map((d) => [
                   DateFormat('dd/MM/yy HH:mm').format(d.date),
                   d.staffName,
@@ -1324,6 +1322,75 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
 
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'Nota_Piutang_$custName.pdf');
+  }
+
+  // Generator Struk PDF per Transaksi
+  Future<void> generateAndShareTransactionPDF(TransactionRecord trx) async {
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.roll80,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Center(
+                child: pw.Column(
+                  children: [
+                    pw.Text('WARUNG BAROKAH', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('KIARAJANGKUNG', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Sukahening, Tasikmalaya', style: const pw.TextStyle(fontSize: 8)),
+                    pw.Divider(thickness: 1),
+                  ],
+                ),
+              ),
+              pw.Text('No Nota : #${trx.id}', style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('Tanggal : ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}', style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('Kasir   : ${trx.staffName}', style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('Metode  : ${trx.paymentType}', style: const pw.TextStyle(fontSize: 8)),
+              pw.Divider(thickness: 0.5),
+              if (trx.items.isNotEmpty)
+                ...trx.items.map((item) => pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text(currencyFormatter.format(item.totalPrice), style: const pw.TextStyle(fontSize: 8)),
+                      ],
+                    ))
+              else
+                pw.Text('Items: ${trx.itemsSummary}', style: const pw.TextStyle(fontSize: 8)),
+              pw.Divider(thickness: 0.5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Total Belanja:', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(currencyFormatter.format(trx.total), style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Bayar:', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text(currencyFormatter.format(trx.payAmount), style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Kembali:', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Text(currencyFormatter.format(trx.change), style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+              pw.SizedBox(height: 10),
+              pw.Center(child: pw.Text('Terima Kasih Atas Kunjungan Anda!', style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic))),
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.sharePdf(bytes: await pdf.save(), filename: 'Struk_Nota_${trx.id}.pdf');
   }
 
   // ================= 4. HALAMAN LAPORAN =================
@@ -1403,7 +1470,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       child: ListTile(
                         title: Text('Nota #${trx.id} [${trx.paymentType}]'),
-                        subtitle: Text('Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)} | Penjaga: ${trx.staffName}\nItem: ${trx.itemsSummary}'),
+                        subtitle: Text('Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)} | Kasir: ${trx.staffName}\nItem: ${trx.itemsSummary}'),
                         trailing: Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
                         onTap: () => showReceiptDialog(trx),
                       ),
@@ -1426,7 +1493,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               const Text('WARUNG BAROKAH KIARAJANGKUNG', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const Text('Kiarajangkung, Sukahening, Tasikmalaya', textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
               const Divider(),
-              Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
+              Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nKasir: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
               const Divider(),
               if (trx.items.isNotEmpty)
                 ...trx.items.map((item) => Row(
@@ -1454,8 +1521,17 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               Navigator.pop(context);
               printReceiptViaBluetooth(trx);
             },
-            icon: const Icon(Icons.print, size: 18),
+            icon: const Icon(Icons.print, size: 16),
             label: const Text('Cetak Bluetooth'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(context);
+              generateAndShareTransactionPDF(trx);
+            },
+            icon: const Icon(Icons.share, size: 16),
+            label: const Text('Kirim PDF WA'),
           ),
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
         ],
