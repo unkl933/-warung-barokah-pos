@@ -32,9 +32,14 @@ class Product {
   String id;
   String name;
   String category;
-  double buyPrice;
-  double price;
-  int stock;
+  double buyPrice; // Harga beli per unit utama
+  double price;    // Harga jual per unit utama (Bungkus/Kg)
+  int stock;       // Disimpan dalam satuan terkecil (Batang / Gram)
+  
+  // Fitur Eceran
+  String retailName;       // Cth: "Batang", "Gram", "Pcs"
+  int retailConversion;    // Cth: 1 bungkus = 12 batang (isi 12), atau 1 kg = 1000 gram
+  double retailPrice;      // Harga jual per satuan eceran
 
   Product({
     required this.id,
@@ -43,17 +48,47 @@ class Product {
     required this.buyPrice,
     required this.price,
     required this.stock,
+    this.retailName = '',
+    this.retailConversion = 1,
+    this.retailPrice = 0,
   });
+
+  bool get hasRetail => retailName.isNotEmpty && retailConversion > 1 && retailPrice > 0;
+
+  // Format tampilan stok agar mudah dibaca (Misal: 58 batang -> 4 Bungkus 10 Batang)
+  String getFormattedStock() {
+    if (!hasRetail) return '$stock Pcs';
+    int mainUnit = stock ~/ retailConversion;
+    int remainder = stock % retailConversion;
+    if (remainder == 0) {
+      return '$mainUnit Unit Utama ($stock)';
+    }
+    return '$mainUnit Unit + $remainder $retailName ($stock Total)';
+  }
 }
 
 class CartItem {
   Product product;
-  int quantity;
+  int quantity; // Jumlah dalam satuan yang dibeli (bisa satuan utama atau eceran)
+  bool isRetail; // True jika dibeli secara eceran
 
-  CartItem({required this.product, required this.quantity});
+  CartItem({required this.product, required this.quantity, this.isRetail = false});
 
-  double get totalPrice => product.price * quantity;
-  double get totalBuyPrice => product.buyPrice * quantity;
+  double get unitPrice => isRetail ? product.retailPrice : product.price;
+  double get totalPrice => unitPrice * quantity;
+  
+  // Total modal proporsional
+  double get totalBuyPrice {
+    if (isRetail) {
+      double buyPerSmallUnit = product.buyPrice / product.retailConversion;
+      return buyPerSmallUnit * quantity;
+    } else {
+      return product.buyPrice * quantity;
+    }
+  }
+
+  // Berapa banyak stok terkecil yang dipotong
+  int get stockDeduction => isRetail ? quantity : (quantity * product.retailConversion);
 }
 
 class TransactionRecord {
@@ -69,7 +104,7 @@ class TransactionRecord {
   double customNetProfit;
   String itemsSummary;
   String staffName;
-  String paymentType; // 'Tunai', 'Kasbon Penuh', 'Kasbon Sebagian'
+  String paymentType;
 
   TransactionRecord({
     required this.id,
@@ -99,7 +134,7 @@ class DebtRecord {
   double totalAmount;
   double paidAmount;
   double remainingAmount;
-  String status; // 'Belum Lunas', 'Lunas'
+  String status;
   String itemsSummary;
   String settlementHistory;
 
@@ -176,6 +211,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       buyPrice: (item['buyPrice'] as num?)?.toDouble() ?? 0,
                       price: (item['price'] as num?)?.toDouble() ?? 0,
                       stock: (item['stock'] as num?)?.toInt() ?? 0,
+                      retailName: item['retailName'] ?? '',
+                      retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
+                      retailPrice: (item['retailPrice'] as num?)?.toDouble() ?? 0,
                     ))
                 .toList();
           });
@@ -201,7 +239,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               } catch (_) {
                 parsedDate = DateTime.now();
               }
-
               return TransactionRecord(
                 id: item['id'].toString(),
                 date: parsedDate,
@@ -241,7 +278,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               } catch (_) {
                 parsedDate = DateTime.now();
               }
-
               return DebtRecord(
                 id: item['id'].toString(),
                 customerName: item['customerName'] ?? '-',
@@ -277,6 +313,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           "buyPrice": product.buyPrice,
           "price": product.price,
           "stock": product.stock,
+          "retailName": product.retailName,
+          "retailConversion": product.retailConversion,
+          "retailPrice": product.retailPrice,
         }),
       );
     } catch (e) {
@@ -287,7 +326,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   Future<void> saveTransactionToGoogleSheets(TransactionRecord trx) async {
     try {
       String itemsSummary = trx.items
-          .map((i) => "${i.product.name} (${i.quantity}x)")
+          .map((i) => "${i.product.name} (${i.quantity}${i.isRetail ? i.product.retailName : ' Unit'})")
           .join(", ");
 
       await http.post(
@@ -379,14 +418,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.shopping_cart), label: 'Kasir'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.book_online), label: 'Kasbon'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.history), label: 'Laporan'),
+          BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Kasir'),
+          BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
+          BottomNavigationBarItem(icon: Icon(Icons.book_online), label: 'Kasbon'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Laporan'),
         ],
       ),
     );
@@ -395,9 +430,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   List<String> getCategories() {
     Set<String> categories = {'Semua'};
     for (var p in products) {
-      if (p.category.isNotEmpty) {
-        categories.add(p.category);
-      }
+      if (p.category.isNotEmpty) categories.add(p.category);
     }
     return categories.toList();
   }
@@ -408,10 +441,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     List<String> categories = getCategories();
 
     List<Product> filteredProducts = products.where((prod) {
-      bool matchesSearch =
-          prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
-      bool matchesCategory =
-          selectedCategory == 'Semua' || prod.category == selectedCategory;
+      bool matchesSearch = prod.name.toLowerCase().contains(searchKasirQuery.toLowerCase());
+      bool matchesCategory = selectedCategory == 'Semua' || prod.category == selectedCategory;
       return matchesSearch && matchesCategory;
     }).toList();
 
@@ -435,17 +466,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       },
                     )
                   : null,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
             ),
-            onChanged: (value) {
-              setState(() {
-                searchKasirQuery = value;
-              });
-            },
+            onChanged: (value) => setState(() => searchKasirQuery = value),
           ),
         ),
         SizedBox(
@@ -462,11 +486,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 child: ChoiceChip(
                   label: Text(cat),
                   selected: isSelected,
-                  onSelected: (bool selected) {
-                    setState(() {
-                      selectedCategory = cat;
-                    });
-                  },
+                  onSelected: (bool selected) => setState(() => selectedCategory = cat),
                   selectedColor: Colors.green[200],
                 ),
               );
@@ -483,28 +503,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   itemBuilder: (context, index) {
                     final prod = filteredProducts[index];
                     return ListTile(
-                      title: Text(prod.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          '${prod.category} | Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.stock}'),
+                          'Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.getFormattedStock()}'),
                       trailing: ElevatedButton(
-                        onPressed: prod.stock > 0
-                            ? () {
-                                setState(() {
-                                  int existingIndex = cart.indexWhere(
-                                      (c) => c.product.id == prod.id);
-                                  if (existingIndex != -1) {
-                                    if (cart[existingIndex].quantity <
-                                        prod.stock) {
-                                      cart[existingIndex].quantity++;
-                                    }
-                                  } else {
-                                    cart.add(
-                                        CartItem(product: prod, quantity: 1));
-                                  }
-                                });
-                              }
-                            : null,
+                        onPressed: prod.stock > 0 ? () => handleAddToCart(prod) : null,
                         child: const Text('Tambah'),
                       ),
                     );
@@ -522,16 +525,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemCount: cart.length,
                     itemBuilder: (context, index) {
                       final item = cart[index];
+                      String unitLabel = item.isRetail ? item.product.retailName : 'Utama';
                       return ListTile(
-                        title: Text(item.product.name),
+                        title: Text('${item.product.name} ($unitLabel)'),
                         subtitle: Text(
-                            '${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}'),
+                            '${item.quantity} x ${currencyFormatter.format(item.unitPrice)} = ${currencyFormatter.format(item.totalPrice)}'),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.remove_circle,
-                                  color: Colors.red),
+                              icon: const Icon(Icons.remove_circle, color: Colors.red),
                               onPressed: () {
                                 setState(() {
                                   if (item.quantity > 1) {
@@ -542,15 +545,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                                 });
                               },
                             ),
-                            Text('${item.quantity}',
-                                style: const TextStyle(fontSize: 16)),
+                            Text('${item.quantity}', style: const TextStyle(fontSize: 16)),
                             IconButton(
-                              icon: const Icon(Icons.add_circle,
-                                  color: Colors.green),
+                              icon: const Icon(Icons.add_circle, color: Colors.green),
                               onPressed: () {
                                 setState(() {
-                                  if (item.quantity < item.product.stock) {
+                                  int maxStock = item.product.stock;
+                                  int currentDeduction = item.isRetail ? (item.quantity + 1) : ((item.quantity + 1) * item.product.retailConversion);
+                                  if (!item.isRetail && currentDeduction <= maxStock || item.isRetail && currentDeduction <= maxStock) {
                                     item.quantity++;
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Stok tidak mencukupi!')));
                                   }
                                 });
                               },
@@ -574,11 +580,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   const Text('Subtotal Belanja:', style: TextStyle(fontSize: 12)),
                   Text(
                     currencyFormatter.format(subtotal),
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[800],
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green[800]),
                   ),
                 ],
               ),
@@ -586,14 +588,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green[700],
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
-                onPressed:
-                    cart.isEmpty ? null : () => showPaymentDialog(subtotal),
-                child: const Text('PROSES BAYAR',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                onPressed: cart.isEmpty ? null : () => showPaymentDialog(subtotal),
+                child: const Text('PROSES BAYAR', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
               )
             ],
           ),
@@ -602,14 +600,78 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
+  // Dialog pilih satuan jika produk punya eceran
+  void handleAddToCart(Product prod) {
+    if (!prod.hasRetail) {
+      // Masukkan langsung 1 unit utama
+      addItemToCart(prod, 1, false);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Pilih Satuan - ${prod.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.inventory, color: Colors.green),
+              title: const Text('Satuan Utama (Bungkus/Kg)'),
+              subtitle: Text('Harga: ${currencyFormatter.format(prod.price)}'),
+              onTap: () {
+                Navigator.pop(context);
+                addItemToCart(prod, 1, false);
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.storefront, color: Colors.blue),
+              title: Text('Satuan Eceran (${prod.retailName})'),
+              subtitle: Text('Harga: ${currencyFormatter.format(prod.retailPrice)}'),
+              onTap: () {
+                Navigator.pop(context);
+                addItemToCart(prod, 1, true);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void addItemToCart(Product prod, int qty, bool isRetail) {
+    setState(() {
+      int requiredStock = isRetail ? qty : (qty * prod.retailConversion);
+      
+      // Cek apakah sudah ada item serupa di keranjang
+      int existingIndex = cart.indexWhere((c) => c.product.id == prod.id && c.isRetail == isRetail);
+      
+      if (existingIndex != -1) {
+        int newQty = cart[existingIndex].quantity + qty;
+        int totalRequired = isRetail ? newQty : (newQty * prod.retailConversion);
+        if (totalRequired <= prod.stock) {
+          cart[existingIndex].quantity = newQty;
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stok tidak cukup!')));
+        }
+      } else {
+        if (requiredStock <= prod.stock) {
+          cart.add(CartItem(product: prod, quantity: qty, isRetail: isRetail));
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stok tidak cukup!')));
+        }
+      }
+    });
+  }
+
   void showPaymentDialog(double subtotal) {
     TextEditingController discountCtrl = TextEditingController(text: '0');
     TextEditingController taxPercentCtrl = TextEditingController(text: '0');
     TextEditingController payCtrl = TextEditingController();
     TextEditingController customerNameCtrl = TextEditingController();
     TextEditingController staffNameCtrl = TextEditingController();
-
-    String paymentType = 'Tunai'; // 'Tunai', 'Kasbon Penuh', 'Kasbon Sebagian'
+    String paymentType = 'Tunai';
 
     showDialog(
       context: context,
@@ -621,14 +683,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             double taxAmount = (subtotal - discount) * (taxPercent / 100);
             double grandTotal = (subtotal - discount) + taxAmount;
             double payAmount = double.tryParse(payCtrl.text) ?? 0;
-
-            if (paymentType == 'Kasbon Penuh') {
-              payAmount = 0;
-            }
-
-            double remainingDebt = paymentType != 'Tunai'
-                ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0)
-                : 0;
+            if (paymentType == 'Kasbon Penuh') payAmount = 0;
+            double remainingDebt = paymentType != 'Tunai' ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0) : 0;
 
             return AlertDialog(
               title: const Text('Pembayaran & Metode'),
@@ -638,183 +694,81 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   children: [
                     TextField(
                       controller: staffNameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nama Penjaga Warung *',
-                        prefixIcon: Icon(Icons.person),
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                      decoration: const InputDecoration(labelText: 'Nama Penjaga Warung *', prefixIcon: Icon(Icons.person), border: OutlineInputBorder(), isDense: true),
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
                       value: paymentType,
-                      decoration: const InputDecoration(
-                        labelText: 'Metode Pembayaran',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                      decoration: const InputDecoration(labelText: 'Metode Pembayaran', border: OutlineInputBorder(), isDense: true),
                       items: const [
-                        DropdownMenuItem(
-                            value: 'Tunai', child: Text('💵 Tunai / Lunas')),
-                        DropdownMenuItem(
-                            value: 'Kasbon Penuh',
-                            child: Text('🔴 Kasbon Penuh (Rp 0)')),
-                        DropdownMenuItem(
-                            value: 'Kasbon Sebagian',
-                            child: Text('🟡 Bayar Sebagian (DP)')),
+                        DropdownMenuItem(value: 'Tunai', child: Text('💵 Tunai / Lunas')),
+                        DropdownMenuItem(value: 'Kasbon Penuh', child: Text('🔴 Kasbon Penuh (Rp 0)')),
+                        DropdownMenuItem(value: 'Kasbon Sebagian', child: Text('🟡 Bayar Sebagian (DP)')),
                       ],
-                      onChanged: (val) {
-                        setDialogState(() {
-                          paymentType = val!;
-                          if (paymentType == 'Kasbon Penuh') {
-                            payCtrl.text = '0';
-                          }
-                        });
-                      },
+                      onChanged: (val) => setDialogState(() {
+                        paymentType = val!;
+                        if (paymentType == 'Kasbon Penuh') payCtrl.text = '0';
+                      }),
                     ),
                     if (paymentType != 'Tunai') ...[
                       const SizedBox(height: 10),
                       TextField(
                         controller: customerNameCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Nama Pengutang / Pelanggan *',
-                          prefixIcon: Icon(Icons.badge),
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                        decoration: const InputDecoration(labelText: 'Nama Pengutang / Pelanggan *', prefixIcon: Icon(Icons.badge), border: OutlineInputBorder(), isDense: true),
                       ),
                     ],
                     const Divider(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Subtotal:'),
-                        Text(currencyFormatter.format(subtotal)),
-                      ],
-                    ),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Subtotal:'), Text(currencyFormatter.format(subtotal))]),
                     const SizedBox(height: 6),
-                    TextField(
-                      controller: discountCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Diskon (Rp)',
-                        prefixText: 'Rp ',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (val) => setDialogState(() {}),
-                    ),
+                    TextField(controller: discountCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Diskon (Rp)', prefixText: 'Rp ', border: OutlineInputBorder(), isDense: true), onChanged: (val) => setDialogState(() {})),
                     const SizedBox(height: 6),
-                    TextField(
-                      controller: taxPercentCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'PPN (%)',
-                        suffixText: '%',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (val) => setDialogState(() {}),
-                    ),
+                    TextField(controller: taxPercentCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'PPN (%)', suffixText: '%', border: OutlineInputBorder(), isDense: true), onChanged: (val) => setDialogState(() {})),
                     const Divider(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('TOTAL BELANJA:',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text(
-                          currencyFormatter.format(grandTotal),
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: Colors.green[800]),
-                        ),
-                      ],
-                    ),
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL BELANJA:', style: TextStyle(fontWeight: FontWeight.bold)), Text(currencyFormatter.format(grandTotal), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green[850]))]),
                     if (paymentType != 'Kasbon Penuh') ...[
                       const SizedBox(height: 10),
-                      TextField(
-                        controller: payCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: InputDecoration(
-                          labelText: paymentType == 'Kasbon Sebagian'
-                              ? 'Uang DP / Bayar Dulu'
-                              : 'Uang Diterima',
-                          prefixText: 'Rp ',
-                          border: const OutlineInputBorder(),
-                        ),
-                        onChanged: (val) => setDialogState(() {}),
-                      ),
+                      TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: paymentType == 'Kasbon Sebagian' ? 'Uang DP' : 'Uang Diterima', prefixText: 'Rp ', border: const OutlineInputBorder()), onChanged: (val) => setDialogState(() {})),
                     ],
                     if (paymentType != 'Tunai') ...[
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(8),
                         color: Colors.red[50],
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Sisa Utang:',
-                                style: TextStyle(color: Colors.red)),
-                            Text(currencyFormatter.format(remainingDebt),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.red)),
-                          ],
-                        ),
+                        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Sisa Utang:', style: TextStyle(color: Colors.red)), Text(currencyFormatter.format(remainingDebt), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red))]),
                       )
                     ]
                   ],
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Batal'),
-                ),
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
                 ElevatedButton(
                   onPressed: () {
                     if (staffNameCtrl.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Isi Nama Penjaga Warung!')),
-                      );
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Penjaga Warung!')));
                       return;
                     }
-
-                    if (paymentType != 'Tunai' &&
-                        customerNameCtrl.text.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Isi Nama Pengutang!')),
-                      );
+                    if (paymentType != 'Tunai' && customerNameCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Pengutang!')));
                       return;
                     }
-
                     if (paymentType == 'Tunai' && payAmount < grandTotal) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Uang bayar kurang!')),
-                      );
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uang pembayaran kurang!')));
                       return;
                     }
 
-                    double kembalian =
-                        (paymentType == 'Tunai') ? payAmount - grandTotal : 0;
+                    double kembalian = (paymentType == 'Tunai') ? payAmount - grandTotal : 0;
 
+                    // Potong stok berdasarkan satuan terkecil
                     for (var item in cart) {
-                      item.product.stock -= item.quantity;
+                      item.product.stock -= item.stockDeduction;
                       saveProductToGoogleSheets(item.product);
                     }
 
-                    String summary = cart
-                        .map((i) => "${i.product.name} (${i.quantity}x)")
-                        .join(", ");
+                    String summary = cart.map((i) => "${i.product.name} (${i.quantity}${i.isRetail ? i.product.retailName : 'x'})").join(", ");
 
                     TransactionRecord trx = TransactionRecord(
-                      id: DateTime.now()
-                          .millisecondsSinceEpoch
-                          .toString()
-                          .substring(7),
+                      id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
                       date: DateTime.now(),
                       items: List.from(cart),
                       subtotal: subtotal,
@@ -842,19 +796,13 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         remainingAmount: remainingDebt,
                         status: 'Belum Lunas',
                         itemsSummary: summary,
-                        settlementHistory: payAmount > 0
-                            ? "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: DP ${currencyFormatter.format(payAmount)} (Diterima: ${staffNameCtrl.text})\n"
-                            : "",
+                        settlementHistory: payAmount > 0 ? "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: DP ${currencyFormatter.format(payAmount)} (${staffNameCtrl.text})\n" : "",
                       );
-
                       saveDebtToGoogleSheets(newDebt);
                       debts.add(newDebt);
                     }
 
-                    setState(() {
-                      cart.clear();
-                    });
-
+                    setState(() => cart.clear());
                     Navigator.pop(context);
                     showReceiptDialog(trx);
                   },
@@ -868,46 +816,33 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 2. HALAMAN MANAJEMEN PRODUK =================
+  // ================= 2. HALAMAN MANAJEMEN PRODUK & ECERAN =================
   Widget buildProductManagementPage() {
     Map<String, int> salesCount = {};
     for (var trx in transactions) {
       for (var item in trx.items) {
-        salesCount[item.product.id] =
-            (salesCount[item.product.id] ?? 0) + item.quantity;
+        salesCount[item.product.id] = (salesCount[item.product.id] ?? 0) + item.stockDeduction;
       }
     }
 
     List<Product> filteredMasterProducts = products.where((prod) {
-      bool matchesSearch =
-          prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
-
-      if (productSortOption == 'Stok Kosong') {
-        return matchesSearch && prod.stock == 0;
-      } else if (productSortOption == 'Stok Menipis (<5)') {
-        return matchesSearch && prod.stock > 0 && prod.stock < 5;
-      }
+      bool matchesSearch = prod.name.toLowerCase().contains(searchMasterQuery.toLowerCase());
+      if (productSortOption == 'Stok Kosong') return matchesSearch && prod.stock == 0;
+      if (productSortOption == 'Stok Menipis') return matchesSearch && prod.stock > 0 && prod.stock < (prod.retailConversion > 1 ? prod.retailConversion : 5);
       return matchesSearch;
     }).toList();
 
     filteredMasterProducts.sort((a, b) {
-      if (productSortOption == 'Stok Terkecil') {
-        return a.stock.compareTo(b.stock);
-      } else if (productSortOption == 'Stok Terbesar') {
-        return b.stock.compareTo(a.stock);
-      } else if (productSortOption == 'Paling Laku') {
-        int salesA = salesCount[a.id] ?? 0;
-        int salesB = salesCount[b.id] ?? 0;
-        return salesB.compareTo(salesA);
-      } else {
-        return a.name.compareTo(b.name);
-      }
+      if (productSortOption == 'Stok Terkecil') return a.stock.compareTo(b.stock);
+      if (productSortOption == 'Stok Terbesar') return b.stock.compareTo(a.stock);
+      if (productSortOption == 'Paling Laku') return (salesCount[b.id] ?? 0).compareTo(salesCount[a.id] ?? 0);
+      return a.name.compareTo(b.name);
     });
 
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.green[700],
-        onPressed: () => showAddProductDialog(),
+        onPressed: () => showProductDialog(null),
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: Column(
@@ -922,61 +857,29 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     decoration: InputDecoration(
                       hintText: 'Cari stok barang...',
                       prefixIcon: const Icon(Icons.search),
-                      suffixIcon: searchMasterQuery.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                setState(() {
-                                  searchMasterController.clear();
-                                  searchMasterQuery = '';
-                                });
-                              },
-                            )
-                          : null,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+                      suffixIcon: searchMasterQuery.isNotEmpty ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() { searchMasterController.clear(); searchMasterQuery = ''; })) : null,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
                     ),
-                    onChanged: (value) {
-                      setState(() {
-                        searchMasterQuery = value;
-                      });
-                    },
+                    onChanged: (val) => setState(() => searchMasterQuery = val),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(10)),
                   child: DropdownButton<String>(
                     value: productSortOption,
                     underline: const SizedBox(),
                     items: const [
-                      DropdownMenuItem(
-                          value: 'Default', child: Text('Urut: Default')),
-                      DropdownMenuItem(
-                          value: 'Stok Kosong',
-                          child: Text('🔴 Stok Kosong (0)')),
-                      DropdownMenuItem(
-                          value: 'Stok Menipis (<5)',
-                          child: Text('🟡 Stok Menipis (<5)')),
-                      DropdownMenuItem(
-                          value: 'Stok Terkecil', child: Text('Stok Terkecil')),
-                      DropdownMenuItem(
-                          value: 'Stok Terbesar', child: Text('Stok Terbesar')),
-                      DropdownMenuItem(
-                          value: 'Paling Laku', child: Text('Paling Laku')),
+                      DropdownMenuItem(value: 'Default', child: Text('Urut: Default')),
+                      DropdownMenuItem(value: 'Stok Kosong', child: Text('🔴 Stok Kosong')),
+                      DropdownMenuItem(value: 'Stok Menipis', child: Text('🟡 Stok Menipis')),
+                      DropdownMenuItem(value: 'Stok Terkecil', child: Text('Stok Terkecil')),
+                      DropdownMenuItem(value: 'Stok Terbesar', child: Text('Stok Terbesar')),
+                      DropdownMenuItem(value: 'Paling Laku', child: Text('Paling Laku')),
                     ],
-                    onChanged: (val) {
-                      setState(() {
-                        productSortOption = val!;
-                      });
-                    },
+                    onChanged: (val) => setState(() => productSortOption = val!),
                   ),
                 ),
               ],
@@ -989,53 +892,24 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemCount: filteredMasterProducts.length,
                     itemBuilder: (context, index) {
                       final prod = filteredMasterProducts[index];
-                      double margin = prod.price - prod.buyPrice;
-                      int totalTerjual = salesCount[prod.id] ?? 0;
-
-                      Color stockColor = Colors.green;
-                      if (prod.stock == 0) {
-                        stockColor = Colors.red;
-                      } else if (prod.stock < 5) {
-                        stockColor = Colors.amber[700]!;
-                      }
+                      Color stockColor = prod.stock == 0 ? Colors.red : (prod.stock < 10 ? Colors.amber[700]! : Colors.green);
 
                       return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         child: ListTile(
                           leading: CircleAvatar(
                             backgroundColor: stockColor,
-                            child: Text(
-                              '${prod.stock}',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12),
-                            ),
+                            child: Text('${prod.stock}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
                           ),
-                          title: Text(prod.name,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
+                          title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: Text(
-                              'Kategori: ${prod.category} | Terjual: $totalTerjual Pcs\nModal: ${currencyFormatter.format(prod.buyPrice)} | Jual: ${currencyFormatter.format(prod.price)}\nUntung: ${currencyFormatter.format(margin)} | Sisa Stok: ${prod.stock} Pcs'),
+                              'Kategori: ${prod.category} | Jual: ${currencyFormatter.format(prod.price)}\nStok: ${prod.getFormattedStock()}${prod.hasRetail ? ' | Eceran: ${prod.retailName} (${currencyFormatter.format(prod.retailPrice)})' : ''}'),
                           isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              IconButton(
-                                icon:
-                                    const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => showEditProductDialog(prod),
-                              ),
-                              IconButton(
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  setState(() {
-                                    products.removeWhere((p) => p.id == prod.id);
-                                  });
-                                },
-                              ),
+                              IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => showProductDialog(prod)),
+                              IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setState(() => products.removeWhere((p) => p.id == prod.id))),
                             ],
                           ),
                         ),
@@ -1048,66 +922,67 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  void showAddProductDialog() {
-    TextEditingController nameCtrl = TextEditingController();
-    TextEditingController categoryCtrl = TextEditingController();
-    TextEditingController buyPriceCtrl = TextEditingController();
-    TextEditingController priceCtrl = TextEditingController();
-    TextEditingController stockCtrl = TextEditingController();
+  // Dialog Tambah/Edit Produk lengkap dengan opsi Eceran
+  void showProductDialog(Product? product) {
+    bool isEdit = product != null;
+    TextEditingController nameCtrl = TextEditingController(text: isEdit ? product.name : '');
+    TextEditingController categoryCtrl = TextEditingController(text: isEdit ? product.category : '');
+    TextEditingController buyPriceCtrl = TextEditingController(text: isEdit ? product.buyPrice.toInt().toString() : '');
+    TextEditingController priceCtrl = TextEditingController(text: isEdit ? product.price.toInt().toString() : '');
+    TextEditingController stockCtrl = TextEditingController(text: isEdit ? product.stock.toString() : '');
+    
+    TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
+    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
+    TextEditingController retailPriceCtrl = TextEditingController(text: isEdit ? product.retailPrice.toInt().toString() : '');
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Tambah Produk Baru'),
+        title: Text(isEdit ? 'Edit Produk & Eceran' : 'Tambah Produk Baru'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Nama Barang')),
-              TextField(
-                  controller: categoryCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Kategori (Cth: Sembako)')),
-              TextField(
-                  controller: buyPriceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Harga Beli / Modal (Rp)')),
-              TextField(
-                  controller: priceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration:
-                      const InputDecoration(labelText: 'Harga Jual (Rp)')),
-              TextField(
-                  controller: stockCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Stok Awal')),
+              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang *')),
+              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Kategori (Cth: Rokok / Sembako)')),
+              TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal Satuan Utama (Rp)')),
+              TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Satuan Utama (Rp)')),
+              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok (Dalam Satuan Terkecil/Batang/Gram)')),
+              const Divider(height: 20),
+              const Text('--- PENGATURAN ECERAN (Opsional) ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+              TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang / Gram)')),
+              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Satuan Utama (Cth: 12 Batang / 1000 Gram)')),
+              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual per Satuan Eceran (Rp)')),
             ],
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
           ElevatedButton(
             onPressed: () {
               if (nameCtrl.text.isNotEmpty) {
                 Product newProd = Product(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  id: isEdit ? product.id : DateTime.now().millisecondsSinceEpoch.toString(),
                   name: nameCtrl.text,
-                  category:
-                      categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
+                  category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
                   buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
                   price: double.tryParse(priceCtrl.text) ?? 0,
                   stock: int.tryParse(stockCtrl.text) ?? 0,
+                  retailName: retailNameCtrl.text,
+                  retailConversion: int.tryParse(retailConvCtrl.text) ?? 1,
+                  retailPrice: double.tryParse(retailPriceCtrl.text) ?? 0,
                 );
                 setState(() {
-                  products.add(newProd);
+                  if (isEdit) {
+                    int idx = products.indexWhere((p) => p.id == product.id);
+                    if (idx != -1) products[idx] = newProd;
+                  } else {
+                    products.add(newProd);
+                  }
                 });
                 saveProductToGoogleSheets(newProd);
                 Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produk berhasil disimpan!')));
               }
             },
             child: const Text('Simpan'),
@@ -1117,80 +992,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  void showEditProductDialog(Product product) {
-    TextEditingController nameCtrl = TextEditingController(text: product.name);
-    TextEditingController categoryCtrl =
-        TextEditingController(text: product.category);
-    TextEditingController buyPriceCtrl =
-        TextEditingController(text: product.buyPrice.toInt().toString());
-    TextEditingController priceCtrl =
-        TextEditingController(text: product.price.toInt().toString());
-    TextEditingController stockCtrl =
-        TextEditingController(text: product.stock.toString());
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Edit Produk'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Nama Barang')),
-              TextField(
-                  controller: categoryCtrl,
-                  decoration: const InputDecoration(labelText: 'Kategori')),
-              TextField(
-                  controller: buyPriceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Harga Beli / Modal (Rp)')),
-              TextField(
-                  controller: priceCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration:
-                      const InputDecoration(labelText: 'Harga Jual (Rp)')),
-              TextField(
-                  controller: stockCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Stok')),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                product.name = nameCtrl.text;
-                product.category =
-                    categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text;
-                product.buyPrice =
-                    double.tryParse(buyPriceCtrl.text) ?? product.buyPrice;
-                product.price =
-                    double.tryParse(priceCtrl.text) ?? product.price;
-                product.stock = int.tryParse(stockCtrl.text) ?? product.stock;
-              });
-              saveProductToGoogleSheets(product);
-              Navigator.pop(context);
-            },
-            child: const Text('Update'),
-          )
-        ],
-      ),
-    );
-  }
-
-  // ================= 3. HALAMAN KASBON & PELUNASAN =================
+  // ================= 3. HALAMAN KASBON =================
   Widget buildDebtPage() {
-    double totalActiveDebts = debts
-        .where((d) => d.status != 'Lunas')
-        .fold(0, (sum, d) => sum + d.remainingAmount);
-
+    double totalActiveDebts = debts.where((d) => d.status != 'Lunas').fold(0, (sum, d) => sum + d.remainingAmount);
     return Scaffold(
       body: Column(
         children: [
@@ -1198,23 +1002,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             width: double.infinity,
             margin: const EdgeInsets.all(10),
             padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.red[50],
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.red.shade200),
-            ),
+            decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
             child: Column(
               children: [
-                const Text(' Total Sisa Piutang / Kasbon Belum Lunas',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const Text('Total Sisa Piutang / Kasbon Belum Lunas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 const SizedBox(height: 4),
-                Text(
-                  currencyFormatter.format(totalActiveDebts),
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red[800]),
-                ),
+                Text(currencyFormatter.format(totalActiveDebts), style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.red[800])),
               ],
             ),
           ),
@@ -1226,53 +1019,26 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemBuilder: (context, index) {
                       final debt = debts[debts.length - 1 - index];
                       bool isLunas = debt.status == 'Lunas';
-
                       return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         child: ExpansionTile(
-                          leading: Icon(
-                            isLunas ? Icons.check_circle : Icons.pending_actions,
-                            color: isLunas ? Colors.green : Colors.red,
-                          ),
-                          title: Text(
-                            '${debt.customerName} (${debt.status})',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: Text(
-                            'Sisa: ${currencyFormatter.format(debt.remainingAmount)} | Total: ${currencyFormatter.format(debt.totalAmount)}\nOleh Penjaga: ${debt.staffName} (${DateFormat('dd/MM/yy HH:mm').format(debt.date)})',
-                            style: const TextStyle(fontSize: 11),
-                          ),
+                          leading: Icon(isLunas ? Icons.check_circle : Icons.pending_actions, color: isLunas ? Colors.green : Colors.red),
+                          title: Text('${debt.customerName} (${debt.status})', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('Sisa: ${currencyFormatter.format(debt.remainingAmount)} | Oleh: ${debt.staffName}', style: const TextStyle(fontSize: 11)),
                           children: [
                             Padding(
                               padding: const EdgeInsets.all(12.0),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Rincian Barang: ${debt.itemsSummary}',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w500)),
-                                  const SizedBox(height: 6),
-                                  if (debt.settlementHistory.isNotEmpty) ...[
-                                    const Text('Riwayat Pelunasan:',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 11)),
-                                    Text(debt.settlementHistory,
-                                        style: const TextStyle(
-                                            fontSize: 10, color: Colors.grey)),
-                                  ],
+                                  Text('Rincian: ${debt.itemsSummary}'),
                                   const SizedBox(height: 10),
                                   if (!isLunas)
                                     ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        foregroundColor: Colors.white,
-                                      ),
-                                      onPressed: () =>
-                                          showSettlementDialog(debt),
+                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                                      onPressed: () => showSettlementDialog(debt),
                                       icon: const Icon(Icons.payment, size: 16),
-                                      label: const Text('Bayar / Pelunasan'),
+                                      label: const Text('Pelunasan'),
                                     )
                                 ],
                               ),
@@ -1291,156 +1057,80 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   void showSettlementDialog(DebtRecord debt) {
     TextEditingController payCtrl = TextEditingController();
     TextEditingController staffCtrl = TextEditingController();
-
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text('Pelunasan Kasbon - ${debt.customerName}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Sisa Utang Saat Ini: ${currencyFormatter.format(debt.remainingAmount)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.red)),
-              const SizedBox(height: 12),
-              TextField(
-                controller: staffCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nama Penjaga Penerima Uang *',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: payCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Jumlah Uang Dibayarkan (Rp)',
-                  prefixText: 'Rp ',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (staffCtrl.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Isi Nama Penjaga Penerima!')),
-                  );
-                  return;
-                }
-
-                double payAmount = double.tryParse(payCtrl.text) ?? 0;
-                if (payAmount <= 0) return;
-
-                setState(() {
-                  debt.paidAmount += payAmount;
-                  debt.remainingAmount -= payAmount;
-                  if (debt.remainingAmount <= 0) {
-                    debt.remainingAmount = 0;
-                    debt.status = 'Lunas';
-                  }
-
-                  String record =
-                      "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Cicil/Lunas ${currencyFormatter.format(payAmount)} (Diterima: ${staffCtrl.text})\n";
-                  debt.settlementHistory += record;
-                });
-
-                saveDebtToGoogleSheets(debt);
-
-                // Tambahkan pencatatan masuk ke Transaksi sebagai Pelunasan
-                TransactionRecord settlementTrx = TransactionRecord(
-                  id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
-                  date: DateTime.now(),
-                  items: [],
-                  subtotal: payAmount,
-                  discount: 0,
-                  tax: 0,
-                  total: payAmount,
-                  payAmount: payAmount,
-                  change: 0,
-                  customNetProfit: payAmount,
-                  itemsSummary: "Pelunasan Utang: ${debt.customerName}",
-                  staffName: staffCtrl.text,
-                  paymentType: 'Pelunasan Kasbon',
-                );
-
-                saveTransactionToGoogleSheets(settlementTrx);
-                transactions.add(settlementTrx);
-
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Pembayaran berhasil dicatat!')),
-                );
-              },
-              child: const Text('Simpan Pembayaran'),
-            )
+      builder: (context) => AlertDialog(
+        title: Text('Pelunasan - ${debt.customerName}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Sisa Utang: ${currencyFormatter.format(debt.remainingAmount)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+            const SizedBox(height: 12),
+            TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Penjaga Penerima *', border: OutlineInputBorder(), isDense: true)),
+            const SizedBox(height: 8),
+            TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Bayar (Rp)', prefixText: 'Rp ', border: OutlineInputBorder())),
           ],
-        );
-      },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () {
+              if (staffCtrl.text.isEmpty) return;
+              double payAmount = double.tryParse(payCtrl.text) ?? 0;
+              if (payAmount <= 0) return;
+
+              setState(() {
+                debt.paidAmount += payAmount;
+                debt.remainingAmount -= payAmount;
+                if (debt.remainingAmount <= 0) {
+                  debt.remainingAmount = 0;
+                  debt.status = 'Lunas';
+                }
+                debt.settlementHistory += "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Bayar ${currencyFormatter.format(payAmount)} (${staffCtrl.text})\n";
+              });
+
+              saveDebtToGoogleSheets(debt);
+
+              TransactionRecord settlementTrx = TransactionRecord(
+                id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                date: DateTime.now(),
+                items: [],
+                subtotal: payAmount,
+                discount: 0,
+                tax: 0,
+                total: payAmount,
+                payAmount: payAmount,
+                change: 0,
+                customNetProfit: payAmount,
+                itemsSummary: "Pelunasan Utang: ${debt.customerName}",
+                staffName: staffCtrl.text,
+                paymentType: 'Pelunasan Kasbon',
+              );
+              saveTransactionToGoogleSheets(settlementTrx);
+              transactions.add(settlementTrx);
+
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran dicatat!')));
+            },
+            child: const Text('Simpan'),
+          )
+        ],
+      ),
     );
   }
 
-  // ================= 4. HALAMAN LAPORAN (HARIAN & BULANAN) =================
+  // ================= 4. HALAMAN LAPORAN =================
   Widget buildHistoryPage() {
     DateTime now = DateTime.now();
 
-    // Transaksi Masuk Tunai Harian
-    double dailyOmsetCash = transactions
-        .where((trx) =>
-            trx.date.year == now.year &&
-            trx.date.month == now.month &&
-            trx.date.day == now.day &&
-            trx.paymentType != 'Kasbon Penuh')
-        .fold(0, (sum, trx) => sum + trx.payAmount);
+    double dailyOmsetCash = transactions.where((t) => t.date.year == now.year && t.date.month == now.month && t.date.day == now.day && t.paymentType != 'Kasbon Penuh').fold(0, (s, t) => s + t.payAmount);
+    double dailyNewDebt = debts.where((d) => d.date.year == now.year && d.date.month == now.month && d.date.day == now.day).fold(0, (s, d) => s + d.remainingAmount);
+    double dailyProfit = transactions.where((t) => t.date.year == now.year && t.date.month == now.month && t.date.day == now.day).fold(0, (s, t) => s + t.netProfit);
+    int dailyCount = transactions.where((t) => t.date.year == now.year && t.date.month == now.month && t.date.day == now.day).length;
 
-    // Kasbon Harian Baru
-    double dailyNewDebt = debts
-        .where((d) =>
-            d.date.year == now.year &&
-            d.date.month == now.month &&
-            d.date.day == now.day)
-        .fold(0, (sum, d) => sum + d.remainingAmount);
-
-    double dailyProfit = transactions
-        .where((trx) =>
-            trx.date.year == now.year &&
-            trx.date.month == now.month &&
-            trx.date.day == now.day)
-        .fold(0, (sum, trx) => sum + trx.netProfit);
-
-    int dailyCount = transactions
-        .where((trx) =>
-            trx.date.year == now.year &&
-            trx.date.month == now.month &&
-            trx.date.day == now.day)
-        .length;
-
-    // Transaksi Bulanan
-    double monthlyOmsetCash = transactions
-        .where((trx) =>
-            trx.date.year == now.year &&
-            trx.date.month == now.month &&
-            trx.paymentType != 'Kasbon Penuh')
-        .fold(0, (sum, trx) => sum + trx.payAmount);
-
-    double monthlyProfit = transactions
-        .where((trx) =>
-            trx.date.year == now.year && trx.date.month == now.month)
-        .fold(0, (sum, trx) => sum + trx.netProfit);
-
-    int monthlyCount = transactions
-        .where((trx) =>
-            trx.date.year == now.year && trx.date.month == now.month)
-        .length;
+    double monthlyOmsetCash = transactions.where((t) => t.date.year == now.year && t.date.month == now.month && t.paymentType != 'Kasbon Penuh').fold(0, (s, t) => s + t.payAmount);
+    double monthlyProfit = transactions.where((t) => t.date.year == now.year && t.date.month == now.month).fold(0, (s, t) => s + t.netProfit);
+    int monthlyCount = transactions.where((t) => t.date.year == now.year && t.date.month == now.month).length;
 
     return SingleChildScrollView(
       child: Column(
@@ -1449,62 +1139,22 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             width: double.infinity,
             margin: const EdgeInsets.all(8),
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.green[50],
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.green.shade200),
-            ),
+            decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.green.shade200)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                    '📅 Rekap Hari Ini (${DateFormat('dd MMM yyyy').format(now)})',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.green[900])),
+                Text('📅 Rekap Hari Ini (${DateFormat('dd MMM yyyy').format(now)})', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green[900])),
                 const Divider(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    Column(
-                      children: [
-                        const Text('Uang Masuk Tunai',
-                            style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(dailyOmsetCash),
-                            style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green[800])),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        const Text('Piutang Baru',
-                            style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(dailyNewDebt),
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.red)),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        const Text('Laba Bersih',
-                            style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(dailyProfit),
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue)),
-                      ],
-                    ),
+                    Column(children: [const Text('Uang Masuk', style: TextStyle(fontSize: 11)), Text(currencyFormatter.format(dailyOmsetCash), style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green[800]))]),
+                    Column(children: [const Text('Piutang Baru', style: TextStyle(fontSize: 11)), Text(currencyFormatter.format(dailyNewDebt), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.red))]),
+                    Column(children: [const Text('Laba Bersih', style: TextStyle(fontSize: 11)), Text(currencyFormatter.format(dailyProfit), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue))]),
                   ],
                 ),
                 const SizedBox(height: 6),
-                Center(
-                    child: Text('$dailyCount Aktivitas Transaksi',
-                        style: const TextStyle(
-                            fontSize: 11, fontStyle: FontStyle.italic))),
+                Center(child: Text('$dailyCount Aktivitas Transaksi', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic))),
               ],
             ),
           ),
@@ -1512,67 +1162,30 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             width: double.infinity,
             margin: const EdgeInsets.symmetric(horizontal: 8),
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
+            decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.blue.shade200)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                    '📊 Rekap Bulan Ini (${DateFormat('MMMM yyyy', 'id_ID').format(now)})',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, color: Colors.blue[900])),
+                Text('📊 Rekap Bulan Ini (${DateFormat('MMMM yyyy', 'id_ID').format(now)})', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue[900])),
                 const Divider(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    Column(
-                      children: [
-                        const Text('Total Uang Masuk',
-                            style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(monthlyOmsetCash),
-                            style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green[800])),
-                      ],
-                    ),
-                    Column(
-                      children: [
-                        const Text('Laba Bersih',
-                            style: TextStyle(fontSize: 11)),
-                        Text(currencyFormatter.format(monthlyProfit),
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue)),
-                      ],
-                    ),
+                    Column(children: [const Text('Total Uang Masuk', style: TextStyle(fontSize: 11)), Text(currencyFormatter.format(monthlyOmsetCash), style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green[800]))]),
+                    Column(children: [const Text('Laba Bersih', style: TextStyle(fontSize: 11)), Text(currencyFormatter.format(monthlyProfit), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blue))]),
                   ],
                 ),
                 const SizedBox(height: 6),
-                Center(
-                    child: Text('$monthlyCount Transaksi Terproses',
-                        style: const TextStyle(
-                            fontSize: 11, fontStyle: FontStyle.italic))),
+                Center(child: Text('$monthlyCount Transaksi', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic))),
               ],
             ),
           ),
           const Padding(
             padding: EdgeInsets.all(8.0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Daftar Riwayat Penjualan',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            ),
+            child: Align(alignment: Alignment.centerLeft, child: Text('Daftar Riwayat Penjualan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
           ),
           transactions.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.all(32.0),
-                  child: Center(child: Text('Belum ada transaksi')),
-                )
+              ? const Padding(padding: EdgeInsets.all(32.0), child: Center(child: Text('Belum ada transaksi')))
               : ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -1580,17 +1193,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   itemBuilder: (context, index) {
                     final trx = transactions[transactions.length - 1 - index];
                     return Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
+                      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       child: ListTile(
                         title: Text('Nota #${trx.id} [${trx.paymentType}]'),
-                        subtitle: Text(
-                            'Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)} | Penjaga: ${trx.staffName}\nItem: ${trx.itemsSummary.isNotEmpty ? trx.itemsSummary : "Detail tersimpan"}'),
-                        trailing: Text(
-                          currencyFormatter.format(trx.total),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, color: Colors.green),
-                        ),
+                        subtitle: Text('Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)} | Penjaga: ${trx.staffName}\nItem: ${trx.itemsSummary}'),
+                        trailing: Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
                         onTap: () => showReceiptDialog(trx),
                       ),
                     );
@@ -1604,128 +1211,64 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   void showReceiptDialog(TransactionRecord trx) {
     showDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('WARUNG BAROKAH KIARAJANGKUNG',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const Text('Kiarajangkung, Sukahening, Tasikmalaya',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 10)),
-                const Divider(),
-                Text(
-                    'No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 10)),
-                const Divider(),
-                if (trx.items.isNotEmpty)
-                  ...trx.items.map((item) => Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('${item.product.name} x${item.quantity}',
-                              style: const TextStyle(fontSize: 12)),
-                          Text(currencyFormatter.format(item.totalPrice),
-                              style: const TextStyle(fontSize: 12)),
-                        ],
-                      ))
-                else if (trx.itemsSummary.isNotEmpty)
-                  Text('Rincian: ${trx.itemsSummary}',
-                      style: const TextStyle(fontSize: 11)),
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Total Belanja:'),
-                    Text(currencyFormatter.format(trx.total),
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Dibayar:'),
-                    Text(currencyFormatter.format(trx.payAmount)),
-                  ],
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Kembali:'),
-                    Text(currencyFormatter.format(trx.change)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                const Text('Terima Kasih Atas Kunjungan Anda!',
-                    style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
-              ],
-            ),
+      builder: (context) => AlertDialog(
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('WARUNG BAROKAH KIARAJANGKUNG', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const Text('Kiarajangkung, Sukahening, Tasikmalaya', textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
+              const Divider(),
+              Text('No: #${trx.id} | ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
+              const Divider(),
+              if (trx.items.isNotEmpty)
+                ...trx.items.map((item) => Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const TextStyle(fontSize: 12)),
+                        Text(currencyFormatter.format(item.totalPrice), style: const TextStyle(fontSize: 12)),
+                      ],
+                    ))
+              else
+                Text('Rincian: ${trx.itemsSummary}', style: const TextStyle(fontSize: 11)),
+              const Divider(),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Total:'), Text(currencyFormatter.format(trx.total), style: const TextStyle(fontWeight: FontWeight.bold))]),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Bayar:'), Text(currencyFormatter.format(trx.payAmount))]),
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Kembali:'), Text(currencyFormatter.format(trx.change))]),
+              const SizedBox(height: 10),
+              const Text('Terima Kasih!', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic)),
+            ],
           ),
-          actions: [
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue, foregroundColor: Colors.white),
-              onPressed: () {
-                Navigator.pop(context);
-                printReceiptViaBluetooth(trx);
-              },
-              icon: const Icon(Icons.print, size: 18),
-              label: const Text('Cetak Bluetooth'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Tutup'),
-            ),
-          ],
-        );
-      },
+        ),
+        actions: [
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(context);
+              printReceiptViaBluetooth(trx);
+            },
+            icon: const Icon(Icons.print, size: 18),
+            label: const Text('Cetak Bluetooth'),
+          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup')),
+        ],
+      ),
     );
   }
 
   Future<void> printReceiptViaBluetooth(TransactionRecord trx) async {
     try {
       List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
-      if (devices.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Tidak ada perangkat Bluetooth tersanding!')),
-        );
-        return;
-      }
-
-      String macAddress = devices.first.macAdress;
-      bool status =
-          await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
-
+      if (devices.isEmpty) return;
+      bool status = await PrintBluetoothThermal.connect(macPrinterAddress: devices.first.macAdress);
       if (status) {
-        String receiptText = "       WARUNG BAROKAH\n"
-            "       KIARAJANGKUNG\n"
-            "Sukahening, Tasikmalaya\n"
-            "--------------------------------\n"
-            "No : #${trx.id}\n"
-            "Tgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\n"
-            "Kasir: ${trx.staffName}\n"
-            "Tipe : ${trx.paymentType}\n"
-            "--------------------------------\n";
-
+        String receiptText = "       WARUNG BAROKAH\n       KIARAJANGKUNG\n--------------------------------\n"
+            "No : #${trx.id}\nTgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\nKasir: ${trx.staffName}\nTipe : ${trx.paymentType}\n--------------------------------\n";
         for (var item in trx.items) {
-          receiptText += "${item.product.name}\n"
-              "  ${item.quantity} x ${currencyFormatter.format(item.product.price)} = ${currencyFormatter.format(item.totalPrice)}\n";
+          receiptText += "${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})\n  = ${currencyFormatter.format(item.totalPrice)}\n";
         }
-
-        receiptText += "--------------------------------\n"
-            "Total   : ${currencyFormatter.format(trx.total)}\n"
-            "Bayar   : ${currencyFormatter.format(trx.payAmount)}\n"
-            "Kembali : ${currencyFormatter.format(trx.change)}\n"
-            "--------------------------------\n"
-            " Terimakasih Atas Kunjungan Anda\n\n\n";
-
-        await PrintBluetoothThermal.writeString(
-            printText: PrintTextSize(size: 1, text: receiptText));
+        receiptText += "--------------------------------\nTotal   : ${currencyFormatter.format(trx.total)}\nBayar   : ${currencyFormatter.format(trx.payAmount)}\nKembali : ${currencyFormatter.format(trx.change)}\n--------------------------------\n Terimakasih Atas Kunjungan Anda\n\n\n";
+        await PrintBluetoothThermal.writeString(printText: PrintTextSize(size: 1, text: receiptText));
         await PrintBluetoothThermal.disconnect;
       }
     } catch (e) {
