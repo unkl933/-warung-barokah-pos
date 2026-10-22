@@ -1387,4 +1387,3 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       );
     }
   }
-}
