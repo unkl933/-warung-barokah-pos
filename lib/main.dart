@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -633,15 +633,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         (p) => p.barcode == code || p.id == code,
       );
 
-      // 🔊 Play Suara Bip Sukses (Volume Rendah / Singkat)
-      FlutterRingtonePlayer.playNotification(volume: 0.2);
+      SystemSound.play(SystemSoundType.click);
+      HapticFeedback.mediumImpact();
 
       handleAddToCart(matchingProduct);
     } catch (_) {
-      // ⚠️ Play Suara Peringatan Barcode Tidak Terdaftar
-      FlutterRingtonePlayer.playAlarm(volume: 0.5);
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.vibrate();
 
-      // Tampilkan SnackBar dengan Tombol Panggil "Tambah Produk Baru"
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 5),
@@ -650,7 +649,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             label: '+ Tambah Produk',
             textColor: Colors.amberAccent,
             onPressed: () {
-              // Berpindah ke tab manajemen produk dan buka dialog tambah
               setState(() => _currentIndex = 1);
               showProductDialog(null, initialBarcode: code);
             },
@@ -1296,7 +1294,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               const Text('WARUNG BAROKAH KIARAJANGKUNG', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const Text('Kiarajangkung, Sukahening, Tasikmalaya', textAlign: TextAlign.center, style: TextStyle(fontSize: 10)),
               const Divider(),
-              Text('No: #${trx.id} | ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
+              Text('No: #${trx.id} | ${DateFormat('dd/MM/yyyy HH:mm').format(trx.date)}\nPenjaga: ${trx.staffName} | Tipe: ${trx.paymentType}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)),
               const Divider(),
               if (trx.items.isNotEmpty)
                 ...trx.items.map((item) => Row(
@@ -1354,36 +1352,28 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 }
 
-  void processScannedBarcode(String code) {
-    try {
-      final matchingProduct = products.firstWhere(
-        (p) => p.barcode == code || p.id == code,
-      );
+class BarcodeScannerScreen extends StatelessWidget {
+  const BarcodeScannerScreen({super.key});
 
-      // 🔊 Suara Bip Sukses & Getaran Pendek Bawaan Flutter
-      SystemSound.play(SystemSoundType.click);
-      HapticFeedback.mediumImpact();
-
-      handleAddToCart(matchingProduct);
-    } catch (_) {
-      // ⚠️ Suara Peringatan Error & Getaran Peringatan
-      SystemSound.play(SystemSoundType.alert);
-      HapticFeedback.vibrate();
-
-      // Tampilkan SnackBar dengan Tombol Panggil "Tambah Produk Baru"
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 5),
-          content: Text('Barcode "$code" belum terdaftar!'),
-          action: SnackBarAction(
-            label: '+ Tambah Produk',
-            textColor: Colors.amberAccent,
-            onPressed: () {
-              setState(() => _currentIndex = 1);
-              showProductDialog(null, initialBarcode: code);
-            },
-          ),
-        ),
-      );
-    }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan Barcode Produk'),
+        backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
+      ),
+      body: MobileScanner(
+        onDetect: (capture) {
+          final List<Barcode> barcodes = capture.barcodes;
+          for (final barcode in barcodes) {
+            if (barcode.rawValue != null) {
+              Navigator.pop(context, barcode.rawValue);
+              break;
+            }
+          }
+        },
+      ),
+    );
   }
+}
