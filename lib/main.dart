@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1354,28 +1354,37 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 }
 
-class BarcodeScannerScreen extends StatelessWidget {
-  const BarcodeScannerScreen({super.key});
+  void processScannedBarcode(String code) {
+    try {
+      final matchingProduct = products.firstWhere(
+        (p) => p.barcode == code || p.id == code,
+      );
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan Barcode Produk'),
-        backgroundColor: Colors.green[700],
-        foregroundColor: Colors.white,
-      ),
-      body: MobileScanner(
-        onDetect: (capture) {
-          final List<Barcode> barcodes = capture.barcodes;
-          for (final barcode in barcodes) {
-            if (barcode.rawValue != null) {
-              Navigator.pop(context, barcode.rawValue);
-              break;
-            }
-          }
-        },
-      ),
-    );
+      // 🔊 Suara Bip Sukses & Getaran Pendek Bawaan Flutter
+      SystemSound.play(SystemSoundType.click);
+      HapticFeedback.mediumImpact();
+
+      handleAddToCart(matchingProduct);
+    } catch (_) {
+      // ⚠️ Suara Peringatan Error & Getaran Peringatan
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.vibrate();
+
+      // Tampilkan SnackBar dengan Tombol Panggil "Tambah Produk Baru"
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text('Barcode "$code" belum terdaftar!'),
+          action: SnackBarAction(
+            label: '+ Tambah Produk',
+            textColor: Colors.amberAccent,
+            onPressed: () {
+              setState(() => _currentIndex = 1);
+              showProductDialog(null, initialBarcode: code);
+            },
+          ),
+        ),
+      );
+    }
   }
 }
