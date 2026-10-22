@@ -39,6 +39,9 @@ dependencies:
   mobile_scanner: ^5.1.1
   http: ^1.2.0  # Tambahkan package ini untuk mengambil data
   audioplayers: ^6.0.0
+  pdf: ^3.10.8
+  printing: ^5.13.1
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:

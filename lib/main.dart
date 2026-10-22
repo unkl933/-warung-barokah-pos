@@ -7,6 +7,9 @@ import 'package:http/http.dart' as http;
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -636,13 +639,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         (p) => p.barcode == code || p.id == code,
       );
 
-      // 🔊 Play Nada Bip Sukses Nyaring
       await audioPlayer.play(UrlSource('https://actions.google.com/sounds/v1/submarines/sonar_ping.ogg'));
       HapticFeedback.mediumImpact();
 
       handleAddToCart(matchingProduct);
     } catch (_) {
-      // ⚠️ Play Nada Peringatan Barcode Tidak Terdaftar
       await audioPlayer.play(UrlSource('https://actions.google.com/sounds/v1/alarms/beep_short.ogg'));
       HapticFeedback.vibrate();
 
@@ -1072,9 +1073,20 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 3. HALAMAN KASBON =================
+  // ================= 3. HALAMAN KASBON / PIUTANG KELOMPOK =================
   Widget buildDebtPage() {
+    // Pengelompokan Piutang berdasarkan Nama Pelanggan
+    Map<String, List<DebtRecord>> groupedDebts = {};
+    for (var d in debts) {
+      String nameKey = d.customerName.trim().toUpperCase();
+      if (!groupedDebts.containsKey(nameKey)) {
+        groupedDebts[nameKey] = [];
+      }
+      groupedDebts[nameKey]!.add(d);
+    }
+
     double totalActiveDebts = debts.where((d) => d.status != 'Lunas').fold(0, (sum, d) => sum + d.remainingAmount);
+
     return Scaffold(
       body: Column(
         children: [
@@ -1085,41 +1097,90 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             decoration: BoxDecoration(color: Colors.red[50], borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.red.shade200)),
             child: Column(
               children: [
-                const Text('Total Sisa Piutang / Kasbon Belum Lunas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                const Text('Total Sisa Piutang Warung', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                 const SizedBox(height: 4),
                 Text(currencyFormatter.format(totalActiveDebts), style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.red[800])),
               ],
             ),
           ),
           Expanded(
-            child: debts.isEmpty
+            child: groupedDebts.isEmpty
                 ? const Center(child: Text('Belum ada data kasbon.'))
                 : ListView.builder(
-                    itemCount: debts.length,
+                    itemCount: groupedDebts.keys.length,
                     itemBuilder: (context, index) {
-                      final debt = debts[debts.length - 1 - index];
-                      bool isLunas = debt.status == 'Lunas';
+                      String custName = groupedDebts.keys.elementAt(index);
+                      List<DebtRecord> custDebts = groupedDebts[custName]!;
+                      
+                      double custTotalDebt = custDebts.where((d) => d.status != 'Lunas').fold(0, (sum, d) => sum + d.remainingAmount);
+                      bool isAllLunas = custTotalDebt == 0;
+
                       return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         child: ExpansionTile(
-                          leading: Icon(isLunas ? Icons.check_circle : Icons.pending_actions, color: isLunas ? Colors.green : Colors.red),
-                          title: Text('${debt.customerName} (${debt.status})', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('Sisa: ${currencyFormatter.format(debt.remainingAmount)} | Oleh: ${debt.staffName}', style: const TextStyle(fontSize: 11)),
+                          leading: CircleAvatar(
+                            backgroundColor: isAllLunas ? Colors.green : Colors.red,
+                            child: Icon(isAllLunas ? Icons.check : Icons.person, color: Colors.white),
+                          ),
+                          title: Text(custName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          subtitle: Text('Sisa Utang: ${currencyFormatter.format(custTotalDebt)} (${custDebts.length} Nota Kasbon)',
+                              style: TextStyle(color: isAllLunas ? Colors.green[700] : Colors.red[700], fontWeight: FontWeight.w500)),
                           children: [
-                            Padding(
-                              padding: const EdgeInsets.all(12.0),
+                            Container(
+                              color: Colors.grey[50],
+                              padding: const EdgeInsets.all(12),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Rincian: ${debt.itemsSummary}'),
-                                  const SizedBox(height: 10),
-                                  if (!isLunas)
-                                    ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                                      onPressed: () => showSettlementDialog(debt),
-                                      icon: const Icon(Icons.payment, size: 16),
-                                      label: const Text('Pelunasan'),
-                                    )
+                                  const Text('--- RINCIAN PIUTANG PELANGGAN ---', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey)),
+                                  const SizedBox(height: 8),
+                                  ...custDebts.map((d) => Container(
+                                        margin: const EdgeInsets.only(bottom: 10),
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(6)),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Text('📅 ${DateFormat('dd/MM/yyyy HH:mm').format(d.date)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                                                Text(d.status, style: TextStyle(color: d.status == 'Lunas' ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 11)),
+                                              ],
+                                            ),
+                                            Text('Penjaga: ${d.staffName}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                            const Divider(height: 12),
+                                            Text('Barang:\n${d.itemsSummary}', style: const TextStyle(fontSize: 12)),
+                                            const SizedBox(height: 6),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Text('Total Nota: ${currencyFormatter.format(d.totalAmount)}', style: const TextStyle(fontSize: 11)),
+                                                Text('Sisa: ${currencyFormatter.format(d.remainingAmount)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 11)),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      )),
+                                  const Divider(),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                    children: [
+                                      if (!isAllLunas)
+                                        ElevatedButton.icon(
+                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                                          onPressed: () => showGroupSettlementDialog(custName, custDebts, custTotalDebt),
+                                          icon: const Icon(Icons.payment, size: 16),
+                                          label: const Text('Bayar Cicil/Lunas'),
+                                        ),
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+                                        onPressed: () => generateAndSharePDF(custName, custDebts, custTotalDebt),
+                                        icon: const Icon(Icons.share, size: 16),
+                                        label: const Text('Kirim PDF WA'),
+                                      ),
+                                    ],
+                                  )
                                 ],
                               ),
                             )
@@ -1134,21 +1195,22 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  void showSettlementDialog(DebtRecord debt) {
+  void showGroupSettlementDialog(String custName, List<DebtRecord> custDebts, double totalDebt) {
     TextEditingController payCtrl = TextEditingController();
     TextEditingController staffCtrl = TextEditingController();
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Pelunasan - ${debt.customerName}'),
+        title: Text('Pelunasan Utang - $custName'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Sisa Utang: ${currencyFormatter.format(debt.remainingAmount)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+            Text('Total Sisa Utang: ${currencyFormatter.format(totalDebt)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
             const SizedBox(height: 12),
             TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Penjaga Penerima *', border: OutlineInputBorder(), isDense: true)),
             const SizedBox(height: 8),
-            TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Bayar (Rp)', prefixText: 'Rp ', border: OutlineInputBorder())),
+            TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Pembayaran (Rp)', prefixText: 'Rp ', border: OutlineInputBorder())),
           ],
         ),
         actions: [
@@ -1159,17 +1221,26 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               double payAmount = double.tryParse(payCtrl.text) ?? 0;
               if (payAmount <= 0) return;
 
-              setState(() {
-                debt.paidAmount += payAmount;
-                debt.remainingAmount -= payAmount;
-                if (debt.remainingAmount <= 0) {
-                  debt.remainingAmount = 0;
-                  debt.status = 'Lunas';
-                }
-                debt.settlementHistory += "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Bayar ${currencyFormatter.format(payAmount)} (${staffCtrl.text})\n";
-              });
+              double remainingPay = payAmount;
 
-              saveDebtToGoogleSheets(debt);
+              setState(() {
+                for (var d in custDebts) {
+                  if (d.status != 'Lunas' && remainingPay > 0) {
+                    if (remainingPay >= d.remainingAmount) {
+                      remainingPay -= d.remainingAmount;
+                      d.paidAmount += d.remainingAmount;
+                      d.remainingAmount = 0;
+                      d.status = 'Lunas';
+                    } else {
+                      d.paidAmount += remainingPay;
+                      d.remainingAmount -= remainingPay;
+                      remainingPay = 0;
+                    }
+                    d.settlementHistory += "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Bayar ${currencyFormatter.format(payAmount)} (${staffCtrl.text})\n";
+                    saveDebtToGoogleSheets(d);
+                  }
+                }
+              });
 
               TransactionRecord settlementTrx = TransactionRecord(
                 id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
@@ -1182,7 +1253,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 payAmount: payAmount,
                 change: 0,
                 customNetProfit: payAmount,
-                itemsSummary: "Pelunasan Utang: ${debt.customerName}",
+                itemsSummary: "Pelunasan Piutang: $custName",
                 staffName: staffCtrl.text,
                 paymentType: 'Pelunasan Kasbon',
               );
@@ -1190,13 +1261,69 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               transactions.add(settlementTrx);
 
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran dicatat!')));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran berhasil dicatat!')));
             },
             child: const Text('Simpan'),
           )
         ],
       ),
     );
+  }
+
+  // Fungsi Pembuat PDF Nota dan Piutang
+  Future<void> generateAndSharePDF(String custName, List<DebtRecord> custDebts, double totalDebt) async {
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Column(
+            cross: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Center(
+                child: pw.Column(
+                  children: [
+                    pw.Text('WARUNG BAROKAH KIARAJANGKUNG', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Sukahening, Tasikmalaya | Telp/WA: 08xx-xxxx-xxxx', style: const pw.TextStyle(fontSize: 10)),
+                    pw.Divider(thickness: 1),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 10),
+              pw.Text('Rincian Piutang / Kasbon Pelanggan:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+              pw.Text('Nama Pelanggan: $custName', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Tanggal Cetak  : ${DateFormat('dd MMMM yyyy HH:mm', 'id_ID').format(DateTime.now())}', style: const pw.TextStyle(fontSize: 10)),
+              pw.SizedBox(height: 12),
+              pw.Table.fromTextArray(
+                headers: ['Tanggal', 'Penjaga', 'Rincian Barang', 'Total', 'Sisa Utang'],
+                data: custDebts.map((d) => [
+                  DateFormat('dd/MM/yy HH:mm').format(d.date),
+                  d.staffName,
+                  d.itemsSummary,
+                  currencyFormatter.format(d.totalAmount),
+                  currencyFormatter.format(d.remainingAmount),
+                ]).toList(),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+              ),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('TOTAL SISA PIUTANG:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+                  pw.Text(currencyFormatter.format(totalDebt), style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14, color: PdfColors.red)),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+              pw.Center(child: pw.Text('Terima Kasih Atas Kepercayaannya!', style: pw.TextStyle(fontStyle: pw.FontStyle.italic, fontSize: 10))),
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.sharePdf(bytes: await pdf.save(), filename: 'Nota_Piutang_$custName.pdf');
   }
 
   // ================= 4. HALAMAN LAPORAN =================
