@@ -11,9 +11,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('id_ID', null);
+  // Inisialisasi tanggal dijalankan tanpa memblokir render UI utama (mencegah blank hitam di HP entry-level)
+  initializeDateFormatting('id_ID', null).catchError((e) {
+    print("Error init date format: $e");
+  });
   runApp(const WarungBarokahApp());
 }
 
@@ -192,7 +195,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
-    fetchAllDataFromGoogleSheets();
+    // Menggunakan Future.microtask agar render UI pertama tidak terblokir di perangkat lambat
+    Future.microtask(() {
+      fetchAllDataFromGoogleSheets();
+    });
   }
 
   void fetchAllDataFromGoogleSheets() {
@@ -395,7 +401,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            // 🖼️ Logo Kecil di Header Utama Aplikasi
             ClipRRect(
               borderRadius: BorderRadius.circular(20),
               child: Image.asset(
@@ -1296,7 +1301,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         build: (pw.Context context) {
           return pw.Stack(
             children: [
-              // 🌫️ Watermark Logo Opacity Rendah di Latar Belakang PDF
               pw.Center(
                 child: pw.Opacity(
                   opacity: 0.08,
@@ -1366,7 +1370,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         build: (pw.Context context) {
           return pw.Stack(
             children: [
-              // 🌫️ Watermark Logo Opacity Rendah di Struk Roll PDF
               pw.Center(
                 child: pw.Opacity(
                   opacity: 0.10,
