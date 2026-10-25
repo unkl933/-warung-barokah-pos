@@ -13,7 +13,6 @@ import 'package:printing/printing.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Inisialisasi tanggal dijalankan tanpa memblokir render UI utama (mencegah blank hitam di HP entry-level)
   initializeDateFormatting('id_ID', null).catchError((e) {
     print("Error init date format: $e");
   });
@@ -195,7 +194,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Menggunakan Future.microtask agar render UI pertama tidak terblokir di perangkat lambat
     Future.microtask(() {
       fetchAllDataFromGoogleSheets();
     });
@@ -752,6 +750,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController payCtrl = TextEditingController();
     TextEditingController customerNameCtrl = TextEditingController();
     TextEditingController staffNameCtrl = TextEditingController();
+    
+    // Variabel untuk Split Bill
+    TextEditingController splitCashCtrl = TextEditingController(text: '0');
+    TextEditingController splitQrisCtrl = TextEditingController(text: '0');
+
     String paymentType = 'Tunai';
 
     showDialog(
@@ -763,9 +766,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             double taxPercent = double.tryParse(taxPercentCtrl.text) ?? 0;
             double taxAmount = (subtotal - discount) * (taxPercent / 100);
             double grandTotal = (subtotal - discount) + taxAmount;
+
             double payAmount = double.tryParse(payCtrl.text) ?? 0;
             if (paymentType == 'Kasbon Penuh') payAmount = 0;
-            double remainingDebt = paymentType != 'Tunai' ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0) : 0;
+            
+            double remainingDebt = paymentType != 'Tunai' && paymentType != 'QRIS' 
+                ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0) 
+                : 0;
+
+            // Perhitungan Split Bill
+            double splitCash = double.tryParse(splitCashCtrl.text) ?? 0;
+            double splitQris = double.tryParse(splitQrisCtrl.text) ?? 0;
+            double splitRemaining = grandTotal - (splitCash + splitQris);
 
             return AlertDialog(
               title: const Text('Pembayaran & Metode'),
@@ -783,15 +795,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       decoration: const InputDecoration(labelText: 'Metode Pembayaran', border: OutlineInputBorder(), isDense: true),
                       items: const [
                         DropdownMenuItem(value: 'Tunai', child: Text('💵 Tunai / Lunas')),
+                        DropdownMenuItem(value: 'QRIS', child: Text('📱 QRIS (Non-Tunai)')),
+                        DropdownMenuItem(value: 'Split Bill', child: Text('🔀 Split Bill (Tunai + QRIS)')),
                         DropdownMenuItem(value: 'Kasbon Penuh', child: Text('🔴 Kasbon Penuh (Rp 0)')),
                         DropdownMenuItem(value: 'Kasbon Sebagian', child: Text('🟡 Bayar Sebagian (DP)')),
                       ],
                       onChanged: (val) => setDialogState(() {
                         paymentType = val!;
                         if (paymentType == 'Kasbon Penuh') payCtrl.text = '0';
+                        if (paymentType == 'QRIS') payCtrl.text = grandTotal.toString();
                       }),
                     ),
-                    if (paymentType != 'Tunai') ...[
+                    if (paymentType != 'Tunai' && paymentType != 'QRIS' && paymentType != 'Split Bill') ...[
                       const SizedBox(height: 10),
                       TextField(
                         controller: customerNameCtrl,
@@ -806,11 +821,74 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     TextField(controller: taxPercentCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'PPN (%)', suffixText: '%', border: OutlineInputBorder(), isDense: true), onChanged: (val) => setDialogState(() {})),
                     const Divider(height: 20),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL BELANJA:', style: TextStyle(fontWeight: FontWeight.bold)), Text(currencyFormatter.format(grandTotal), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green[850]))]),
-                    if (paymentType != 'Kasbon Penuh') ...[
+                    
+                    // TAMPILAN JIKA PILIH QRIS (Menampilkan Simulasi Barcode QRIS)
+                    if (paymentType == 'QRIS') ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
+                        child: Column(
+                          children: [
+                            const Text('Scan QRIS Warung Barokah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            const SizedBox(height: 8),
+                            Container(
+                              width: 140,
+                              height: 140,
+                              color: Colors.white,
+                              child: const Center(
+                                child: Icon(Icons.qr_code_2, size: 120, color: Colors.black87),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text('Nominal: ${currencyFormatter.format(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                          ],
+                        ),
+                      )
+                    ],
+
+                    // TAMPILAN JIKA PILIH SPLIT BILL
+                    if (paymentType == 'Split Bill') ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.amber[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.amber.shade300)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Pengaturan Split Bill (Bagi Tagihan):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: splitCashCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'Bayar Tunai (Rp)', prefixText: 'Rp ', border: OutlineInputBorder(), isDense: true),
+                              onChanged: (val) => setDialogState(() {}),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: splitQrisCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(labelText: 'Bayar QRIS (Rp)', prefixText: 'Rp ', border: OutlineInputBorder(), isDense: true),
+                              onChanged: (val) => setDialogState(() {}),
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Kurang / Sisa:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                Text(currencyFormatter.format(splitRemaining), style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: splitRemaining == 0 ? Colors.green : Colors.red)),
+                              ],
+                            )
+                          ],
+                        ),
+                      )
+                    ],
+
+                    if (paymentType != 'Kasbon Penuh' && paymentType != 'QRIS' && paymentType != 'Split Bill') ...[
                       const SizedBox(height: 10),
                       TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: paymentType == 'Kasbon Sebagian' ? 'Uang DP' : 'Uang Diterima', prefixText: 'Rp ', border: const OutlineInputBorder()), onChanged: (val) => setDialogState(() {})),
                     ],
-                    if (paymentType != 'Tunai') ...[
+                    if (paymentType != 'Tunai' && paymentType != 'QRIS' && paymentType != 'Split Bill') ...[
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(8),
@@ -829,7 +907,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Kasir!')));
                       return;
                     }
-                    if (paymentType != 'Tunai' && customerNameCtrl.text.isEmpty) {
+                    if (paymentType != 'Tunai' && paymentType != 'QRIS' && paymentType != 'Split Bill' && customerNameCtrl.text.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Pengutang!')));
                       return;
                     }
@@ -837,8 +915,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uang pembayaran kurang!')));
                       return;
                     }
+                    if (paymentType == 'Split Bill' && splitRemaining > 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Total pembayaran Split Bill belum lunas!')));
+                      return;
+                    }
 
-                    double kembalian = (paymentType == 'Tunai') ? payAmount - grandTotal : 0;
+                    double finalPaid = paymentType == 'QRIS' ? grandTotal : (paymentType == 'Split Bill' ? (splitCash + splitQris) : payAmount);
+                    double kembalian = (paymentType == 'Tunai') ? finalPaid - grandTotal : 0;
+                    if (paymentType == 'Split Bill' && (splitCash + splitQris) > grandTotal) {
+                      kembalian = (splitCash + splitQris) - grandTotal;
+                    }
 
                     for (var item in cart) {
                       item.product.stock -= item.stockDeduction;
@@ -846,6 +932,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     }
 
                     String summary = cart.map((i) => "${i.product.name} (${i.quantity}${i.isRetail ? i.product.retailName : 'x'})").join(", ");
+                    String finalPaymentLabel = paymentType == 'Split Bill' ? 'Split Bill (Tunai+QRIS)' : paymentType;
 
                     TransactionRecord trx = TransactionRecord(
                       id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
@@ -855,28 +942,28 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       discount: discount,
                       tax: taxAmount,
                       total: grandTotal,
-                      payAmount: payAmount,
+                      payAmount: finalPaid,
                       change: kembalian,
                       staffName: staffNameCtrl.text,
-                      paymentType: paymentType,
+                      paymentType: finalPaymentLabel,
                       itemsSummary: summary,
                     );
 
                     saveTransactionToGoogleSheets(trx);
                     transactions.add(trx);
 
-                    if (paymentType != 'Tunai') {
+                    if (paymentType != 'Tunai' && paymentType != 'QRIS' && paymentType != 'Split Bill') {
                       DebtRecord newDebt = DebtRecord(
                         id: DateTime.now().millisecondsSinceEpoch.toString(),
                         customerName: customerNameCtrl.text,
                         staffName: staffNameCtrl.text,
                         date: DateTime.now(),
                         totalAmount: grandTotal,
-                        paidAmount: payAmount,
+                        paidAmount: finalPaid,
                         remainingAmount: remainingDebt,
                         status: 'Belum Lunas',
                         itemsSummary: summary,
-                        settlementHistory: payAmount > 0 ? "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: DP ${currencyFormatter.format(payAmount)} (${staffNameCtrl.text})\n" : "",
+                        settlementHistory: finalPaid > 0 ? "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: DP ${currencyFormatter.format(finalPaid)} (${staffNameCtrl.text})\n" : "",
                       );
                       saveDebtToGoogleSheets(newDebt);
                       debts.add(newDebt);
