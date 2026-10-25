@@ -832,14 +832,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           children: [
                             const Text('Scan QRIS Warung Barokah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                             const SizedBox(height: 8),
-                            Container(
-                              width: 140,
-                              height: 140,
-                              color: Colors.white,
-                              child: const Center(
-                                child: Icon(Icons.qr_code_2, size: 120, color: Colors.black87),
-                              ),
-                            ),
+                            Image.asset(
+                                  'assets/images/qris.png', 
+                                   width: 180, 
+                                   height: 180, 
+                                   fit: BoxFit.contain,
+                                ),
                             const SizedBox(height: 6),
                             Text('Nominal: ${currencyFormatter.format(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                           ],
