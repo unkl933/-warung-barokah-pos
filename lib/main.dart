@@ -751,7 +751,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController customerNameCtrl = TextEditingController();
     TextEditingController staffNameCtrl = TextEditingController();
     
-    // Variabel untuk Split Bill
     TextEditingController splitCashCtrl = TextEditingController(text: '0');
     TextEditingController splitQrisCtrl = TextEditingController(text: '0');
 
@@ -774,7 +773,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ? (grandTotal - payAmount > 0 ? grandTotal - payAmount : 0) 
                 : 0;
 
-            // Perhitungan Split Bill
             double splitCash = double.tryParse(splitCashCtrl.text) ?? 0;
             double splitQris = double.tryParse(splitQrisCtrl.text) ?? 0;
             double splitRemaining = grandTotal - (splitCash + splitQris);
@@ -822,7 +820,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     const Divider(height: 20),
                     Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL BELANJA:', style: TextStyle(fontWeight: FontWeight.bold)), Text(currencyFormatter.format(grandTotal), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.green[850]))]),
                     
-                    // TAMPILAN JIKA PILIH QRIS (Menampilkan Simulasi Barcode QRIS)
                     if (paymentType == 'QRIS') ...[
                       const SizedBox(height: 10),
                       Container(
@@ -833,11 +830,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             const Text('Scan QRIS Warung Barokah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                             const SizedBox(height: 8),
                             Image.asset(
-                                  'assets/images/qris.png', 
-                                   width: 180, 
-                                   height: 180, 
-                                   fit: BoxFit.contain,
-                                ),
+                              'assets/images/qris.png',
+                              width: 180,
+                              height: 180,
+                              fit: BoxFit.contain,
+                            ),
                             const SizedBox(height: 6),
                             Text('Nominal: ${currencyFormatter.format(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                           ],
@@ -845,7 +842,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       )
                     ],
 
-                    // TAMPILAN JIKA PILIH SPLIT BILL
                     if (paymentType == 'Split Bill') ...[
                       const SizedBox(height: 10),
                       Container(
