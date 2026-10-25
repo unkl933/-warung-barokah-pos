@@ -827,13 +827,33 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
                         child: Column(
                           children: [
-                            const Text('Scan QRIS Warung Barokah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            const Text('Scan QRIS Warung Barokah (Tap untuk Zoom)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                             const SizedBox(height: 8),
-                            Image.asset(
-                              'assets/images/qris.png',
-                              width: 180,
-                              height: 180,
-                              fit: BoxFit.contain,
+                            GestureDetector(
+                              onTap: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => Dialog(
+                                    backgroundColor: Colors.black,
+                                    child: InteractiveViewer(
+                                      panEnabled: true,
+                                      boundaryMargin: const EdgeInsets.all(20),
+                                      minScale: 0.5,
+                                      maxScale: 4,
+                                      child: Image.asset(
+                                        'assets/images/qris.png',
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Image.asset(
+                                'assets/images/qris.png',
+                                width: 180,
+                                height: 180,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                             const SizedBox(height: 6),
                             Text('Nominal: ${currencyFormatter.format(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
@@ -1297,76 +1317,149 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void showGroupSettlementDialog(String custName, List<DebtRecord> custDebts, double totalDebt) {
-    TextEditingController payCtrl = TextEditingController();
+    TextEditingController payCtrl = TextEditingController(text: totalDebt.toString());
     TextEditingController staffCtrl = TextEditingController();
+    String paymentType = 'Tunai';
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Pelunasan Utang - $custName'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Total Sisa Utang: ${currencyFormatter.format(totalDebt)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-            const SizedBox(height: 12),
-            TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Kasir Penerima *', border: OutlineInputBorder(), isDense: true)),
-            const SizedBox(height: 8),
-            TextField(controller: payCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Pembayaran (Rp)', prefixText: 'Rp ', border: OutlineInputBorder())),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: () {
-              if (staffCtrl.text.isEmpty) return;
-              double payAmount = double.tryParse(payCtrl.text) ?? 0;
-              if (payAmount <= 0) return;
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          double payAmount = double.tryParse(payCtrl.text) ?? 0;
 
-              double remainingPay = payAmount;
-
-              setState(() {
-                for (var d in custDebts) {
-                  if (d.status != 'Lunas' && remainingPay > 0) {
-                    if (remainingPay >= d.remainingAmount) {
-                      remainingPay -= d.remainingAmount;
-                      d.paidAmount += d.remainingAmount;
-                      d.remainingAmount = 0;
-                      d.status = 'Lunas';
-                    } else {
-                      d.paidAmount += remainingPay;
-                      d.remainingAmount -= remainingPay;
-                      remainingPay = 0;
-                    }
-                    d.settlementHistory += "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Bayar ${currencyFormatter.format(payAmount)} (${staffCtrl.text})\n";
-                    saveDebtToGoogleSheets(d);
+          return AlertDialog(
+            title: Text('Pelunasan Utang - $custName'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Total Sisa Utang: ${currencyFormatter.format(totalDebt)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                  const SizedBox(height: 12),
+                  TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Kasir Penerima *', border: OutlineInputBorder(), isDense: true)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: paymentType,
+                    decoration: const InputDecoration(labelText: 'Metode Pembayaran', border: OutlineInputBorder(), isDense: true),
+                    items: const [
+                      DropdownMenuItem(value: 'Tunai', child: Text('💵 Tunai')),
+                      DropdownMenuItem(value: 'QRIS', child: Text('📱 QRIS (Non-Tunai)')),
+                    ],
+                    onChanged: (val) => setDialogState(() {
+                      paymentType = val!;
+                      if (paymentType == 'QRIS') payCtrl.text = totalDebt.toString();
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  if (paymentType == 'QRIS') ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
+                      child: Column(
+                        children: [
+                          const Text('Scan QRIS Pelunasan Utang (Tap untuk Zoom)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          const SizedBox(height: 8),
+                          GestureDetector(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => Dialog(
+                                  backgroundColor: Colors.black,
+                                  child: InteractiveViewer(
+                                    panEnabled: true,
+                                    boundaryMargin: const EdgeInsets.all(20),
+                                    minScale: 0.5,
+                                    maxScale: 4,
+                                    child: Image.asset(
+                                      'assets/images/qris.png',
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Image.asset(
+                              'assets/images/qris.png',
+                              width: 180,
+                              height: 180,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text('Nominal: ${currencyFormatter.format(payAmount)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (paymentType != 'QRIS') ...[
+                    TextField(
+                      controller: payCtrl, 
+                      keyboardType: TextInputType.number, 
+                      decoration: const InputDecoration(labelText: 'Jumlah Pembayaran (Rp)', prefixText: 'Rp ', border: OutlineInputBorder()), 
+                      onChanged: (val) => setDialogState(() {}),
+                    ),
+                  ]
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+              ElevatedButton(
+                onPressed: () {
+                  if (staffCtrl.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Kasir!')));
+                    return;
                   }
-                }
-              });
+                  double finalPayAmount = paymentType == 'QRIS' ? totalDebt : (double.tryParse(payCtrl.text) ?? 0);
+                  if (finalPayAmount <= 0) return;
 
-              TransactionRecord settlementTrx = TransactionRecord(
-                id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
-                date: DateTime.now(),
-                items: [],
-                subtotal: payAmount,
-                discount: 0,
-                tax: 0,
-                total: payAmount,
-                payAmount: payAmount,
-                change: 0,
-                customNetProfit: payAmount,
-                itemsSummary: "Pelunasan Piutang: $custName",
-                staffName: staffCtrl.text,
-                paymentType: 'Pelunasan Kasbon',
-              );
-              saveTransactionToGoogleSheets(settlementTrx);
-              transactions.add(settlementTrx);
+                  double remainingPay = finalPayAmount;
 
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran berhasil dicatat!')));
-            },
-            child: const Text('Simpan'),
-          )
-        ],
+                  setState(() {
+                    for (var d in custDebts) {
+                      if (d.status != 'Lunas' && remainingPay > 0) {
+                        if (remainingPay >= d.remainingAmount) {
+                          remainingPay -= d.remainingAmount;
+                          d.paidAmount += d.remainingAmount;
+                          d.remainingAmount = 0;
+                          d.status = 'Lunas';
+                        } else {
+                          d.paidAmount += remainingPay;
+                          d.remainingAmount -= remainingPay;
+                          remainingPay = 0;
+                        }
+                        d.settlementHistory += "${DateFormat('dd/MM/yy HH:mm').format(DateTime.now())}: Bayar via $paymentType ${currencyFormatter.format(finalPayAmount)} (${staffCtrl.text})\n";
+                        saveDebtToGoogleSheets(d);
+                      }
+                    }
+                  });
+
+                  TransactionRecord settlementTrx = TransactionRecord(
+                    id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                    date: DateTime.now(),
+                    items: [],
+                    subtotal: finalPayAmount,
+                    discount: 0,
+                    tax: 0,
+                    total: finalPayAmount,
+                    payAmount: finalPayAmount,
+                    change: 0,
+                    customNetProfit: finalPayAmount,
+                    itemsSummary: "Pelunasan Piutang ($paymentType): $custName",
+                    staffName: staffCtrl.text,
+                    paymentType: 'Pelunasan Kasbon ($paymentType)',
+                  );
+                  saveTransactionToGoogleSheets(settlementTrx);
+                  transactions.add(settlementTrx);
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pembayaran berhasil dicatat!')));
+                },
+                child: const Text('Simpan'),
+              )
+            ],
+          );
+        },
       ),
     );
   }
