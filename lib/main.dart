@@ -517,7 +517,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Kasir'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Produk'),
-          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Kulakan'), // Menu Belanja Ulang
+          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Belanja'), // Menu Belanja Ulang
           BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Sales'),
           BottomNavigationBarItem(icon: Icon(Icons.book_online), label: 'Kasbon'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Laporan'),
@@ -1261,7 +1261,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
     
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
-    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '12');
+    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
     TextEditingController retailPriceCtrl = TextEditingController(text: isEdit ? product.retailPrice.toInt().toString() : '');
     
     bool isConsignment = isEdit ? product.isConsignment : false;
