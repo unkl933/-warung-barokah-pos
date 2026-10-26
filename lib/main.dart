@@ -281,24 +281,39 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         List<dynamic> data = json.decode(response.body);
         if (data.isNotEmpty) {
           setState(() {
-            products = data
-                .map((item) => Product(
-                      id: item['id'].toString(),
-                      name: item['name'] ?? '',
-                      category: item['category'] ?? 'Umum',
-                      buyPrice: (item['buyPrice'] as num?)?.toDouble() ?? 0,
-                      price: (item['price'] as num?)?.toDouble() ?? 0,
-                      halfPrice: (item['halfPrice'] as num?)?.toDouble() ?? 0,
-                      quarterPrice: (item['quarterPrice'] as num?)?.toDouble() ?? 0,
-                      stock: (item['stock'] as num?)?.toInt() ?? 0,
-                      retailName: item['retailName'] ?? '',
-                      retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
-                      retailPrice: (item['retailPrice'] as num?)?.toDouble() ?? 0,
-                      barcode: item['barcode'] ?? '',
-                      isConsignment: item['isConsignment'] == true || item['isConsignment'].toString() == 'true',
-                      salesName: item['salesName'] ?? '',
-                    ))
-                .toList();
+            products = data.map((item) {
+              String id = item['id'].toString();
+              
+              // Pengaman agar status konsinyasi tidak hilang saat sync
+              bool existingConsignment = false;
+              String existingSalesName = '';
+              
+              try {
+                final oldProd = products.firstWhere((p) => p.id == id);
+                existingConsignment = oldProd.isConsignment;
+                existingSalesName = oldProd.salesName;
+              } catch (_) {}
+
+              bool serverIsConsignment = item['isConsignment'] == true || item['isConsignment'].toString() == 'true';
+              String serverSalesName = item['salesName'] ?? '';
+
+              return Product(
+                id: id,
+                name: item['name'] ?? '',
+                category: item['category'] ?? 'Umum',
+                buyPrice: (item['buyPrice'] as num?)?.toDouble() ?? 0,
+                price: (item['price'] as num?)?.toDouble() ?? 0,
+                halfPrice: (item['halfPrice'] as num?)?.toDouble() ?? 0,
+                quarterPrice: (item['quarterPrice'] as num?)?.toDouble() ?? 0,
+                stock: (item['stock'] as num?)?.toInt() ?? 0,
+                retailName: item['retailName'] ?? '',
+                retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
+                retailPrice: (item['retailPrice'] as num?)?.toDouble() ?? 0,
+                barcode: item['barcode'] ?? '',
+                isConsignment: serverIsConsignment || existingConsignment,
+                salesName: serverSalesName.isNotEmpty ? serverSalesName : existingSalesName,
+              );
+            }).toList();
           });
         }
       }
