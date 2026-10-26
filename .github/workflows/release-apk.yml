@@ -3,7 +3,7 @@ name: Build and Release Flutter APK
 on:
   push:
     tags:
-      - 'v*' # Trigger saat tag dibuat, contoh: v1.0.1
+      - 'v*' # Trigger saat tag dibuat, contoh: v1.0.2
 
 permissions:
   contents: write # Memberikan izin tulis untuk membuat Release & upload APK
@@ -34,7 +34,15 @@ jobs:
         run: flutter pub get
 
       - name: Build APK Release
-        run: flutter build apk --release
+        run: |
+          # Mengambil nama tag (misal: v1.0.2) dan menghapus huruf 'v' di depannya
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION_NAME="${TAG_NAME#v}"
+          
+          echo "Building version: $VERSION_NAME with build number: ${{ github.run_number }}"
+          
+          # Build APK dengan versi dinamis tanpa mengubah pubspec.yaml
+          flutter build apk --release --build-name=$VERSION_NAME --build-number=${{ github.run_number }}
 
       - name: Create GitHub Release and Upload APK
         uses: softprops/action-gh-release@v1
