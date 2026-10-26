@@ -3,7 +3,10 @@ name: Build and Release Flutter APK
 on:
   push:
     tags:
-      - 'v*' # Trigger otomatis saat Anda membuat tag versi, contoh: v1.0.0
+      - 'v*' # Trigger saat tag dibuat, contoh: v1.0.1
+
+permissions:
+  contents: write # Memberikan izin tulis untuk membuat Release & upload APK
 
 jobs:
   build:
@@ -23,7 +26,7 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.x' # Sesuaikan dengan versi Flutter Anda
+          flutter-version: '3.x'
           channel: 'stable'
           cache: true
 
