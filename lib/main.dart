@@ -42,6 +42,8 @@ class Product {
   String category;
   double buyPrice;
   double price;
+  double halfPrice;     // Harga 1/2 Unit/Bungkus
+  double quarterPrice;  // Harga 1/4 Unit/Bungkus
   int stock;
   String retailName;
   int retailConversion;
@@ -54,6 +56,8 @@ class Product {
     required this.category,
     required this.buyPrice,
     required this.price,
+    this.halfPrice = 0,
+    this.quarterPrice = 0,
     required this.stock,
     this.retailName = '',
     this.retailConversion = 1,
@@ -62,38 +66,81 @@ class Product {
   });
 
   bool get hasRetail => retailName.isNotEmpty && retailConversion > 1 && retailPrice > 0;
+  bool get hasHalfPrice => halfPrice > 0;
+  bool get hasQuarterPrice => quarterPrice > 0;
 
   String getFormattedStock() {
     if (!hasRetail) return '$stock Pcs';
     int mainUnit = stock ~/ retailConversion;
     int remainder = stock % retailConversion;
     if (remainder == 0) {
-      return '$mainUnit Unit Utama ($stock)';
+      return '$mainUnit Unit Utama ($stock Total)';
     }
     return '$mainUnit Unit + $remainder $retailName ($stock Total)';
   }
 }
 
+enum CartUnitType { full, half, quarter, retail }
+
 class CartItem {
   Product product;
   int quantity;
-  bool isRetail;
+  CartUnitType unitType;
 
-  CartItem({required this.product, required this.quantity, this.isRetail = false});
+  CartItem({
+    required this.product, 
+    required this.quantity, 
+    this.unitType = CartUnitType.full
+  });
 
-  double get unitPrice => isRetail ? product.retailPrice : product.price;
-  double get totalPrice => unitPrice * quantity;
-  
-  double get totalBuyPrice {
-    if (isRetail) {
-      double buyPerSmallUnit = product.buyPrice / product.retailConversion;
-      return buyPerSmallUnit * quantity;
-    } else {
-      return product.buyPrice * quantity;
+  double get unitPrice {
+    switch (unitType) {
+      case CartUnitType.quarter:
+        return product.quarterPrice;
+      case CartUnitType.half:
+        return product.halfPrice;
+      case CartUnitType.retail:
+        return product.retailPrice;
+      case CartUnitType.full:
+      default:
+        return product.price;
     }
   }
 
-  int get stockDeduction => isRetail ? quantity : (quantity * product.retailConversion);
+  double get totalPrice => unitPrice * quantity;
+  
+  double get totalBuyPrice {
+    double buyPerSmallUnit = product.buyPrice / (product.retailConversion > 0 ? product.retailConversion : 1);
+    return buyPerSmallUnit * stockDeduction;
+  }
+
+  int get stockDeduction {
+    switch (unitType) {
+      case CartUnitType.quarter:
+        return quantity * (product.retailConversion ~/ 4);
+      case CartUnitType.half:
+        return quantity * (product.retailConversion ~/ 2);
+      case CartUnitType.retail:
+        return quantity;
+      case CartUnitType.full:
+      default:
+        return quantity * product.retailConversion;
+    }
+  }
+
+  String get unitLabel {
+    switch (unitType) {
+      case CartUnitType.quarter:
+        return '1/4 Unit';
+      case CartUnitType.half:
+        return '1/2 Unit';
+      case CartUnitType.retail:
+        return product.retailName.isNotEmpty ? product.retailName : 'Eceran';
+      case CartUnitType.full:
+      default:
+        return 'Utama';
+    }
+  }
 }
 
 class TransactionRecord {
@@ -219,6 +266,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       category: item['category'] ?? 'Umum',
                       buyPrice: (item['buyPrice'] as num?)?.toDouble() ?? 0,
                       price: (item['price'] as num?)?.toDouble() ?? 0,
+                      halfPrice: (item['halfPrice'] as num?)?.toDouble() ?? 0,
+                      quarterPrice: (item['quarterPrice'] as num?)?.toDouble() ?? 0,
                       stock: (item['stock'] as num?)?.toInt() ?? 0,
                       retailName: item['retailName'] ?? '',
                       retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
@@ -322,6 +371,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           "category": product.category,
           "buyPrice": product.buyPrice,
           "price": product.price,
+          "halfPrice": product.halfPrice,
+          "quarterPrice": product.quarterPrice,
           "stock": product.stock,
           "retailName": product.retailName,
           "retailConversion": product.retailConversion,
@@ -337,7 +388,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   Future<void> saveTransactionToGoogleSheets(TransactionRecord trx) async {
     try {
       String itemsSummary = trx.items
-          .map((i) => "${i.product.name} (${i.quantity}${i.isRetail ? i.product.retailName : ' Unit'})")
+          .map((i) => "${i.product.name} (${i.quantity} ${i.unitLabel})")
           .join(", ");
 
       await http.post(
@@ -558,7 +609,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     return ListTile(
                       title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          'Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.getFormattedStock()}'),
+                          'Jual: ${currencyFormatter.format(prod.price)}${prod.hasHalfPrice ? ' | 1/2: ${currencyFormatter.format(prod.halfPrice)}' : ''}${prod.hasQuarterPrice ? ' | 1/4: ${currencyFormatter.format(prod.quarterPrice)}' : ''}\nStok: ${prod.getFormattedStock()}'),
+                      isThreeLine: prod.hasHalfPrice || prod.hasQuarterPrice,
                       trailing: ElevatedButton(
                         onPressed: prod.stock > 0 ? () => handleAddToCart(prod) : null,
                         child: const Text('Tambah'),
@@ -578,9 +630,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     itemCount: cart.length,
                     itemBuilder: (context, index) {
                       final item = cart[index];
-                      String unitLabel = item.isRetail ? item.product.retailName : 'Utama';
                       return ListTile(
-                        title: Text('${item.product.name} ($unitLabel)'),
+                        title: Text('${item.product.name} (${item.unitLabel})'),
                         subtitle: Text(
                             '${item.quantity} x ${currencyFormatter.format(item.unitPrice)} = ${currencyFormatter.format(item.totalPrice)}'),
                         trailing: Row(
@@ -603,8 +654,19 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                               icon: const Icon(Icons.add_circle, color: Colors.green),
                               onPressed: () {
                                 setState(() {
-                                  int currentDeduction = item.isRetail ? (item.quantity + 1) : ((item.quantity + 1) * item.product.retailConversion);
-                                  if (currentDeduction <= item.product.stock) {
+                                  int nextQty = item.quantity + 1;
+                                  int checkDeduction = 0;
+                                  if (item.unitType == CartUnitType.quarter) {
+                                    checkDeduction = nextQty * (item.product.retailConversion ~/ 4);
+                                  } else if (item.unitType == CartUnitType.half) {
+                                    checkDeduction = nextQty * (item.product.retailConversion ~/ 2);
+                                  } else if (item.unitType == CartUnitType.retail) {
+                                    checkDeduction = nextQty;
+                                  } else {
+                                    checkDeduction = nextQty * item.product.retailConversion;
+                                  }
+
+                                  if (checkDeduction <= item.product.stock) {
                                     item.quantity++;
                                   } else {
                                     ScaffoldMessenger.of(context).showSnackBar(
@@ -684,8 +746,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   }
 
   void handleAddToCart(Product prod) {
-    if (!prod.hasRetail) {
-      addItemToCart(prod, 1, false);
+    if (!prod.hasRetail && !prod.hasHalfPrice && !prod.hasQuarterPrice) {
+      addItemToCart(prod, 1, CartUnitType.full);
       return;
     }
 
@@ -698,37 +760,83 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.inventory, color: Colors.green),
-              title: const Text('Satuan Utama'),
+              title: const Text('Satuan Utuh (Bungkus/Pax)'),
               subtitle: Text('Harga: ${currencyFormatter.format(prod.price)}'),
               onTap: () {
                 Navigator.pop(context);
-                addItemToCart(prod, 1, false);
+                addItemToCart(prod, 1, CartUnitType.full);
               },
             ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.storefront, color: Colors.blue),
-              title: Text('Satuan Eceran (${prod.retailName})'),
-              subtitle: Text('Harga: ${currencyFormatter.format(prod.retailPrice)}'),
-              onTap: () {
-                Navigator.pop(context);
-                addItemToCart(prod, 1, true);
-              },
-            ),
+            if (prod.hasHalfPrice) ...[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.pie_chart, color: Colors.orange),
+                title: const Text('Setengah (1/2 Bungkus)'),
+                subtitle: Text('Harga: ${currencyFormatter.format(prod.halfPrice)}'),
+                onTap: () {
+                  Navigator.pop(context);
+                  addItemToCart(prod, 1, CartUnitType.half);
+                },
+              ),
+            ],
+            if (prod.hasQuarterPrice) ...[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.donut_small, color: Colors.purple),
+                title: const Text('Seperempat (1/4 Bungkus)'),
+                subtitle: Text('Harga: ${currencyFormatter.format(prod.quarterPrice)}'),
+                onTap: () {
+                  Navigator.pop(context);
+                  addItemToCart(prod, 1, CartUnitType.quarter);
+                },
+              ),
+            ],
+            if (prod.hasRetail) ...[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.storefront, color: Colors.blue),
+                title: Text('Satuan Eceran (${prod.retailName})'),
+                subtitle: Text('Harga: ${currencyFormatter.format(prod.retailPrice)}'),
+                onTap: () {
+                  Navigator.pop(context);
+                  addItemToCart(prod, 1, CartUnitType.retail);
+                },
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
-  void addItemToCart(Product prod, int qty, bool isRetail) {
+  void addItemToCart(Product prod, int qty, CartUnitType unitType) {
     setState(() {
-      int requiredStock = isRetail ? qty : (qty * prod.retailConversion);
-      int existingIndex = cart.indexWhere((c) => c.product.id == prod.id && c.isRetail == isRetail);
+      int requiredStock = 0;
+      if (unitType == CartUnitType.quarter) {
+        requiredStock = qty * (prod.retailConversion ~/ 4);
+      } else if (unitType == CartUnitType.half) {
+        requiredStock = qty * (prod.retailConversion ~/ 2);
+      } else if (unitType == CartUnitType.retail) {
+        requiredStock = qty;
+      } else {
+        requiredStock = qty * prod.retailConversion;
+      }
+
+      int existingIndex = cart.indexWhere((c) => c.product.id == prod.id && c.unitType == unitType);
       
       if (existingIndex != -1) {
         int newQty = cart[existingIndex].quantity + qty;
-        int totalRequired = isRetail ? newQty : (newQty * prod.retailConversion);
+        int totalRequired = 0;
+        if (unitType == CartUnitType.quarter) {
+          totalRequired = newQty * (prod.retailConversion ~/ 4);
+        } else if (unitType == CartUnitType.half) {
+          totalRequired = newQty * (prod.retailConversion ~/ 2);
+        } else if (unitType == CartUnitType.retail) {
+          totalRequired = newQty;
+        } else {
+          totalRequired = newQty * prod.retailConversion;
+        }
+
         if (totalRequired <= prod.stock) {
           cart[existingIndex].quantity = newQty;
         } else {
@@ -736,7 +844,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         }
       } else {
         if (requiredStock <= prod.stock) {
-          cart.add(CartItem(product: prod, quantity: qty, isRetail: isRetail));
+          cart.add(CartItem(product: prod, quantity: qty, unitType: unitType));
         } else {
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stok tidak cukup!')));
         }
@@ -945,7 +1053,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       saveProductToGoogleSheets(item.product);
                     }
 
-                    String summary = cart.map((i) => "${i.product.name} (${i.quantity}${i.isRetail ? i.product.retailName : 'x'})").join(", ");
+                    String summary = cart.map((i) => "${i.product.name} (${i.quantity} ${i.unitLabel})").join(", ");
                     String finalPaymentLabel = paymentType == 'Split Bill' ? 'Split Bill (Tunai+QRIS)' : paymentType;
 
                     TransactionRecord trx = TransactionRecord(
@@ -1085,7 +1193,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           ),
                           title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                           subtitle: Text(
-                              'Kategori: ${prod.category} | Barcode: ${prod.barcode.isNotEmpty ? prod.barcode : "-"}\nStok: ${prod.getFormattedStock()}${prod.hasRetail ? ' | Eceran: ${prod.retailName}' : ''}'),
+                              'Kategori: ${prod.category} | Barcode: ${prod.barcode.isNotEmpty ? prod.barcode : "-"}\nStok: ${prod.getFormattedStock()}${prod.hasHalfPrice ? ' | 1/2: ${currencyFormatter.format(prod.halfPrice)}' : ''}${prod.hasQuarterPrice ? ' | 1/4: ${currencyFormatter.format(prod.quarterPrice)}' : ''}${prod.hasRetail ? ' | Eceran: ${prod.retailName}' : ''}'),
                           isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1110,13 +1218,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController categoryCtrl = TextEditingController(text: isEdit ? product.category : '');
     TextEditingController buyPriceCtrl = TextEditingController(text: isEdit ? product.buyPrice.toInt().toString() : '');
     TextEditingController priceCtrl = TextEditingController(text: isEdit ? product.price.toInt().toString() : '');
+    TextEditingController halfPriceCtrl = TextEditingController(text: isEdit ? product.halfPrice.toInt().toString() : '');
+    TextEditingController quarterPriceCtrl = TextEditingController(text: isEdit ? product.quarterPrice.toInt().toString() : '');
     TextEditingController stockCtrl = TextEditingController(text: isEdit ? product.stock.toString() : '');
     TextEditingController barcodeCtrl = TextEditingController(
       text: isEdit ? product.barcode : (initialBarcode ?? ''),
     );
     
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
-    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
+    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '12');
     TextEditingController retailPriceCtrl = TextEditingController(text: isEdit ? product.retailPrice.toInt().toString() : '');
 
     showDialog(
@@ -1147,14 +1257,16 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   ),
                 ],
               ),
-              TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal Satuan Utama (Rp)')),
-              TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Satuan Utama (Rp)')),
-              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stok (Satuan Terkecil)')),
+              TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal 1 Bungkus/Utuh (Rp)')),
+              TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1 Bungkus/Utuh (Rp)')),
+              TextField(controller: halfPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/2 Bungkus (Rp)')),
+              TextField(controller: quarterPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/4 Bungkus (Rp)')),
+              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Total Stok (Dalam Satuan Terkecil/Batang)')),
               const Divider(height: 20),
               const Text('--- PENGATURAN ECERAN ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
               TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang)')),
-              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Utama (Cth: 12)')),
-              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Eceran (Rp)')),
+              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Bungkus (Cth: 12 Batang)')),
+              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Eceran per Batang (Rp)')),
             ],
           ),
         ),
@@ -1169,6 +1281,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
                   buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
                   price: double.tryParse(priceCtrl.text) ?? 0,
+                  halfPrice: double.tryParse(halfPriceCtrl.text) ?? 0,
+                  quarterPrice: double.tryParse(quarterPriceCtrl.text) ?? 0,
                   stock: int.tryParse(stockCtrl.text) ?? 0,
                   retailName: retailNameCtrl.text,
                   retailConversion: int.tryParse(retailConvCtrl.text) ?? 1,
@@ -1574,7 +1688,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     ...trx.items.map((item) => pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                           children: [
-                            pw.Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const pw.TextStyle(fontSize: 8)),
+                            pw.Text('${item.product.name} (${item.quantity} ${item.unitLabel})', style: const pw.TextStyle(fontSize: 8)),
                             pw.Text(currencyFormatter.format(item.totalPrice), style: const pw.TextStyle(fontSize: 8)),
                           ],
                         ))
@@ -1734,7 +1848,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     ...trx.items.map((item) => Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})', style: const TextStyle(fontSize: 12)),
+                            Text('${item.product.name} (${item.quantity} ${item.unitLabel})', style: const TextStyle(fontSize: 12)),
                             Text(currencyFormatter.format(item.totalPrice), style: const TextStyle(fontSize: 12)),
                           ],
                         ))
@@ -1785,7 +1899,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         String receiptText = "       WARUNG BAROKAH\n       KIARAJANGKUNG\n--------------------------------\n"
             "No : #${trx.id}\nTgl: ${DateFormat('dd/MM/yy HH:mm').format(trx.date)}\nKasir: ${trx.staffName}\nTipe : ${trx.paymentType}\n--------------------------------\n";
         for (var item in trx.items) {
-          receiptText += "${item.product.name} (${item.quantity}${item.isRetail ? item.product.retailName : ''})\n  = ${currencyFormatter.format(item.totalPrice)}\n";
+          receiptText += "${item.product.name} (${item.quantity} ${item.unitLabel})\n  = ${currencyFormatter.format(item.totalPrice)}\n";
         }
         receiptText += "--------------------------------\nTotal   : ${currencyFormatter.format(trx.total)}\nBayar   : ${currencyFormatter.format(trx.payAmount)}\nKembali : ${currencyFormatter.format(trx.change)}\n--------------------------------\n Terimakasih Atas Kunjungan Anda\n\n\n";
         await PrintBluetoothThermal.writeString(printText: PrintTextSize(size: 1, text: receiptText));
