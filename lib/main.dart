@@ -42,13 +42,15 @@ class Product {
   String category;
   double buyPrice;
   double price;
-  double halfPrice;     // Harga 1/2 Unit/Bungkus
-  double quarterPrice;  // Harga 1/4 Unit/Bungkus
+  double halfPrice;     
+  double quarterPrice;  
   int stock;
   String retailName;
   int retailConversion;
   double retailPrice;
   String barcode;
+  bool isConsignment;
+  String salesName;
 
   Product({
     required this.id,
@@ -63,6 +65,8 @@ class Product {
     this.retailConversion = 1,
     this.retailPrice = 0,
     this.barcode = '',
+    this.isConsignment = false,
+    this.salesName = '',
   });
 
   bool get hasRetail => retailName.isNotEmpty && retailConversion > 1 && retailPrice > 0;
@@ -110,6 +114,7 @@ class CartItem {
   double get totalPrice => unitPrice * quantity;
   
   double get totalBuyPrice {
+    if (product.isConsignment) return 0;
     double buyPerSmallUnit = product.buyPrice / (product.retailConversion > 0 ? product.retailConversion : 1);
     return buyPerSmallUnit * stockDeduction;
   }
@@ -174,7 +179,16 @@ class TransactionRecord {
     this.paymentType = 'Tunai',
   });
 
-  double get totalCapital => items.fold(0, (sum, item) => sum + item.totalBuyPrice);
+  double get totalCapital {
+    return items.fold(0, (sum, item) {
+      if (item.product.isConsignment) {
+        double buyPerSmallUnit = item.product.buyPrice / (item.product.retailConversion > 0 ? item.product.retailConversion : 1);
+        return sum + (buyPerSmallUnit * item.stockDeduction);
+      }
+      return sum + item.totalBuyPrice;
+    });
+  }
+
   double get netProfit => items.isNotEmpty ? ((subtotal - discount) - totalCapital) : customNetProfit;
 }
 
@@ -273,6 +287,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       retailConversion: (item['retailConversion'] as num?)?.toInt() ?? 1,
                       retailPrice: (item['retailPrice'] as num?)?.toDouble() ?? 0,
                       barcode: item['barcode'] ?? '',
+                      isConsignment: item['isConsignment'] == true || item['isConsignment'].toString() == 'true',
+                      salesName: item['salesName'] ?? '',
                     ))
                 .toList();
           });
@@ -378,6 +394,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           "retailConversion": product.retailConversion,
           "retailPrice": product.retailPrice,
           "barcode": product.barcode,
+          "isConsignment": product.isConsignment,
+          "salesName": product.salesName,
         }),
       );
     } catch (e) {
@@ -442,6 +460,8 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     final List<Widget> pages = [
       buildKasirPage(),
       buildProductManagementPage(),
+      buildRestockPage(), // Menu Baru: Belanja Ulang / Kulakan Stok
+      buildConsignmentReportPage(),
       buildDebtPage(),
       buildHistoryPage(),
     ];
@@ -496,7 +516,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Kasir'),
-          BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Produk/Stok'),
+          BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Produk'),
+          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Kulakan'), // Menu Belanja Ulang
+          BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Sales'),
           BottomNavigationBarItem(icon: Icon(Icons.book_online), label: 'Kasbon'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Laporan'),
         ],
@@ -609,8 +631,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     return ListTile(
                       title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                       subtitle: Text(
-                          'Jual: ${currencyFormatter.format(prod.price)}${prod.hasHalfPrice ? ' | 1/2: ${currencyFormatter.format(prod.halfPrice)}' : ''}${prod.hasQuarterPrice ? ' | 1/4: ${currencyFormatter.format(prod.quarterPrice)}' : ''}\nStok: ${prod.getFormattedStock()}'),
-                      isThreeLine: prod.hasHalfPrice || prod.hasQuarterPrice,
+                          'Jual: ${currencyFormatter.format(prod.price)} | Stok: ${prod.getFormattedStock()}'),
                       trailing: ElevatedButton(
                         onPressed: prod.stock > 0 ? () => handleAddToCart(prod) : null,
                         child: const Text('Tambah'),
@@ -1105,7 +1126,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 2. HALAMAN MANAJEMEN PRODUK & BARCODE =================
+  // ================= 2. HALAMAN MANAJEMEN PRODUK =================
   Widget buildProductManagementPage() {
     Map<String, int> salesCount = {};
     for (var trx in transactions) {
@@ -1119,6 +1140,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           prod.barcode.toLowerCase().contains(searchMasterQuery.toLowerCase());
       if (productSortOption == 'Stok Kosong') return matchesSearch && prod.stock == 0;
       if (productSortOption == 'Stok Menipis') return matchesSearch && prod.stock > 0 && prod.stock < (prod.retailConversion > 1 ? prod.retailConversion : 5);
+      if (productSortOption == 'Barang Sales') return matchesSearch && prod.isConsignment;
       return matchesSearch;
     }).toList();
 
@@ -1163,6 +1185,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     underline: const SizedBox(),
                     items: const [
                       DropdownMenuItem(value: 'Default', child: Text('Urut: Default')),
+                      DropdownMenuItem(value: 'Barang Sales', child: Text('🤝 Barang Sales/Titipan')),
                       DropdownMenuItem(value: 'Stok Kosong', child: Text('🔴 Stok Kosong')),
                       DropdownMenuItem(value: 'Stok Menipis', child: Text('🟡 Stok Menipis')),
                       DropdownMenuItem(value: 'Stok Terkecil', child: Text('Stok Terkecil')),
@@ -1191,9 +1214,21 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             backgroundColor: stockColor,
                             child: Text('${prod.stock}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
                           ),
-                          title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          title: Row(
+                            children: [
+                              Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              if (prod.isConsignment) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                  decoration: BoxDecoration(color: Colors.orange[100], borderRadius: BorderRadius.circular(4)),
+                                  child: Text('Sales: ${prod.salesName}', style: TextStyle(fontSize: 9, color: Colors.orange[900], fontWeight: FontWeight.bold)),
+                                )
+                              ]
+                            ],
+                          ),
                           subtitle: Text(
-                              'Kategori: ${prod.category} | Barcode: ${prod.barcode.isNotEmpty ? prod.barcode : "-"}\nStok: ${prod.getFormattedStock()}${prod.hasHalfPrice ? ' | 1/2: ${currencyFormatter.format(prod.halfPrice)}' : ''}${prod.hasQuarterPrice ? ' | 1/4: ${currencyFormatter.format(prod.quarterPrice)}' : ''}${prod.hasRetail ? ' | Eceran: ${prod.retailName}' : ''}'),
+                              'Kategori: ${prod.category} | Jual: ${currencyFormatter.format(prod.price)}\nStok: ${prod.getFormattedStock()}'),
                           isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1228,88 +1263,444 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
     TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '12');
     TextEditingController retailPriceCtrl = TextEditingController(text: isEdit ? product.retailPrice.toInt().toString() : '');
+    
+    bool isConsignment = isEdit ? product.isConsignment : false;
+    TextEditingController salesNameCtrl = TextEditingController(text: isEdit ? product.salesName : '');
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(isEdit ? 'Edit Produk & Barcode' : 'Tambah Produk Baru'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang *')),
-              TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Kategori')),
-              Row(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text(isEdit ? 'Edit Produk' : 'Tambah Produk Baru'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(child: TextField(controller: barcodeCtrl, decoration: const InputDecoration(labelText: 'Kode Barcode'))),
-                  IconButton(
-                    icon: const Icon(Icons.camera_alt, color: Colors.green),
-                    tooltip: 'Scan Barcode',
-                    onPressed: () async {
-                      final scanned = await Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
-                      );
-                      if (scanned != null) {
-                        barcodeCtrl.text = scanned.toString();
-                      }
-                    },
+                  SwitchListTile(
+                    title: const Text('Barang Titipan Sales (Konsinyasi)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    value: isConsignment,
+                    onChanged: (val) => setDialogState(() => isConsignment = val),
                   ),
+                  if (isConsignment) ...[
+                    TextField(controller: salesNameCtrl, decoration: const InputDecoration(labelText: 'Nama Sales / Supplier *')),
+                    const SizedBox(height: 6),
+                  ],
+                  TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nama Barang *')),
+                  TextField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Kategori')),
+                  Row(
+                    children: [
+                      Expanded(child: TextField(controller: barcodeCtrl, decoration: const InputDecoration(labelText: 'Kode Barcode'))),
+                      IconButton(
+                        icon: const Icon(Icons.camera_alt, color: Colors.green),
+                        tooltip: 'Scan Barcode',
+                        onPressed: () async {
+                          final scanned = await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const BarcodeScannerScreen()),
+                          );
+                          if (scanned != null) {
+                            barcodeCtrl.text = scanned.toString();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal / Harga Beli (Rp)')),
+                  TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1 Bungkus/Utuh (Rp)')),
+                  TextField(controller: halfPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/2 Bungkus (Rp)')),
+                  TextField(controller: quarterPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/4 Bungkus (Rp)')),
+                  TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Total Stok Awal (Satuan Terkecil/Pcs)')),
+                  const Divider(height: 20),
+                  const Text('--- PENGATURAN ECERAN ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
+                  TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang)')),
+                  TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Bungkus Utuh (Cth: 12)')),
+                  TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Eceran (Rp)')),
                 ],
               ),
-              TextField(controller: buyPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Modal 1 Bungkus/Utuh (Rp)')),
-              TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1 Bungkus/Utuh (Rp)')),
-              TextField(controller: halfPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/2 Bungkus (Rp)')),
-              TextField(controller: quarterPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual 1/4 Bungkus (Rp)')),
-              TextField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Total Stok (Dalam Satuan Terkecil/Batang)')),
-              const Divider(height: 20),
-              const Text('--- PENGATURAN ECERAN ---', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-              TextField(controller: retailNameCtrl, decoration: const InputDecoration(labelText: 'Nama Satuan Eceran (Cth: Batang)')),
-              TextField(controller: retailConvCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Isi per Bungkus (Cth: 12 Batang)')),
-              TextField(controller: retailPriceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual Eceran per Batang (Rp)')),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
-          ElevatedButton(
-            onPressed: () {
-              if (nameCtrl.text.isNotEmpty) {
-                Product newProd = Product(
-                  id: isEdit ? product.id : DateTime.now().millisecondsSinceEpoch.toString(),
-                  name: nameCtrl.text,
-                  category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
-                  buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
-                  price: double.tryParse(priceCtrl.text) ?? 0,
-                  halfPrice: double.tryParse(halfPriceCtrl.text) ?? 0,
-                  quarterPrice: double.tryParse(quarterPriceCtrl.text) ?? 0,
-                  stock: int.tryParse(stockCtrl.text) ?? 0,
-                  retailName: retailNameCtrl.text,
-                  retailConversion: int.tryParse(retailConvCtrl.text) ?? 1,
-                  retailPrice: double.tryParse(retailPriceCtrl.text) ?? 0,
-                  barcode: barcodeCtrl.text,
-                );
-                setState(() {
-                  if (isEdit) {
-                    int idx = products.indexWhere((p) => p.id == product.id);
-                    if (idx != -1) products[idx] = newProd;
-                  } else {
-                    products.add(newProd);
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+              ElevatedButton(
+                onPressed: () {
+                  if (nameCtrl.text.isNotEmpty) {
+                    Product newProd = Product(
+                      id: isEdit ? product.id : DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: nameCtrl.text,
+                      category: categoryCtrl.text.isEmpty ? 'Umum' : categoryCtrl.text,
+                      buyPrice: double.tryParse(buyPriceCtrl.text) ?? 0,
+                      price: double.tryParse(priceCtrl.text) ?? 0,
+                      halfPrice: double.tryParse(halfPriceCtrl.text) ?? 0,
+                      quarterPrice: double.tryParse(quarterPriceCtrl.text) ?? 0,
+                      stock: int.tryParse(stockCtrl.text) ?? 0,
+                      retailName: retailNameCtrl.text,
+                      retailConversion: int.tryParse(retailConvCtrl.text) ?? 1,
+                      retailPrice: double.tryParse(retailPriceCtrl.text) ?? 0,
+                      barcode: barcodeCtrl.text,
+                      isConsignment: isConsignment,
+                      salesName: salesNameCtrl.text,
+                    );
+                    setState(() {
+                      if (isEdit) {
+                        int idx = products.indexWhere((p) => p.id == product.id);
+                        if (idx != -1) products[idx] = newProd;
+                      } else {
+                        products.add(newProd);
+                      }
+                    });
+                    saveProductToGoogleSheets(newProd);
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produk berhasil disimpan!')));
                   }
-                });
-                saveProductToGoogleSheets(newProd);
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Produk berhasil disimpan!')));
-              }
-            },
-            child: const Text('Simpan'),
-          )
-        ],
+                },
+                child: const Text('Simpan'),
+              )
+            ],
+          );
+        },
       ),
     );
   }
 
-  // ================= 3. HALAMAN KASBON / PIUTANG KELOMPOK =================
+  // ================= 3. HALAMAN KULAKAN / BELANJA ULANG (RESTOCK) =================
+  Widget buildRestockPage() {
+    List<Product> lowStockProducts = products.where((p) => p.stock < 10 && !p.isConsignment).toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Belanja Ulang / Kulakan Stok Mandiri'),
+        backgroundColor: Colors.green[800],
+        automaticallyImplyLeading: false,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.amber[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.amber.shade300)),
+              child: const Text(
+                '💡 Fitur Kulakan: Pilih barang yang stoknya menipis/habis atau ingin dibelanjakan kembali saat modal terkumpul. Masukkan jumlah kulakan dan total uang belanja, stok otomatis bertambah dan tercatat sebagai pengeluaran.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text('Daftar Produk Stok Menipis / Habis:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 6),
+            Expanded(
+              child: lowStockProducts.isEmpty
+                  ? const Center(child: Text('Semua stok produk mandiri masih aman.'))
+                  : ListView.builder(
+                      itemCount: lowStockProducts.length,
+                      itemBuilder: (context, index) {
+                        final prod = lowStockProducts[index];
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: ListTile(
+                            title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text('Stok Saat Ini: ${prod.getFormattedStock()}\nEstimasi Modal Satuan: ${currencyFormatter.format(prod.buyPrice)}'),
+                            trailing: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                              onPressed: () => showRestockDialog(prod),
+                              icon: const Icon(Icons.add_shopping_cart, size: 16),
+                              label: const Text('Kulakan'),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            // Tombol kulakan bebas untuk produk apa saja
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: OutlinedButton.icon(
+                  onPressed: () => showRestockDialog(null),
+                  icon: const Icon(Icons.search),
+                  label: const Text('Cari Produk Lain untuk Kulakan'),
+                ),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  void showRestockDialog(Product? selectedProd) {
+    Product? chosenProduct = selectedProd;
+    TextEditingController addStockCtrl = TextEditingController(text: '10');
+    TextEditingController totalCostCtrl = TextEditingController();
+    TextEditingController staffCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Form Belanja Ulang / Kulakan'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (chosenProduct == null) ...[
+                    DropdownButtonFormField<Product>(
+                      decoration: const InputDecoration(labelText: 'Pilih Produk *', border: OutlineInputBorder(), isDense: true),
+                      items: products.where((p) => !p.isConsignment).map((p) => DropdownMenuItem(value: p, child: Text('${p.name} (Stok: ${p.stock})'))).toList(),
+                      onChanged: (val) => setDialogState(() {
+                        chosenProduct = val;
+                        if (chosenProduct != null) {
+                          double estCost = chosenProduct!.buyPrice * 10;
+                          totalCostCtrl.text = estCost.toInt().toString();
+                        }
+                      }),
+                    ),
+                  ] else ...[
+                    Text('Produk: ${chosenProduct!.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('Stok Sekarang: ${chosenProduct!.getFormattedStock()}'),
+                  ],
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: staffCtrl,
+                    decoration: const InputDecoration(labelText: 'Nama Pengelola / Kasir *', border: OutlineInputBorder(), isDense: true),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: addStockCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Jumlah Tambahan Stok (Satuan Terkecil/Pcs)', border: OutlineInputBorder(), isDense: true),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: totalCostCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Total Uang Belanja / Modal Keluar (Rp)', prefixText: 'Rp ', border: OutlineInputBorder(), isDense: true),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+                onPressed: () {
+                  if (chosenProduct == null || staffCtrl.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pilih produk dan isi nama pengelola!')));
+                    return;
+                  }
+                  int addStock = int.tryParse(addStockCtrl.text) ?? 0;
+                  double totalCost = double.tryParse(totalCostCtrl.text) ?? 0;
+
+                  if (addStock <= 0 || totalCost <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Jumlah stok dan total biaya harus valid!')));
+                    return;
+                  }
+
+                  setState(() {
+                    chosenProduct!.stock += addStock;
+                  });
+                  saveProductToGoogleSheets(chosenProduct!);
+
+                  // Catat sebagai pengeluaran kulakan di laporan transaksi
+                  TransactionRecord restockTrx = TransactionRecord(
+                    id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                    date: DateTime.now(),
+                    items: [],
+                    subtotal: totalCost,
+                    discount: 0,
+                    tax: 0,
+                    total: totalCost,
+                    payAmount: totalCost,
+                    change: 0,
+                    customNetProfit: -totalCost, // Dicatat sebagai pengeluaran modal
+                    itemsSummary: "Kulakan/Belanja Ulang: ${chosenProduct!.name} (+ $addStock Pcs)",
+                    staffName: staffCtrl.text,
+                    paymentType: 'Kulakan / Restock',
+                  );
+                  saveTransactionToGoogleSheets(restockTrx);
+                  transactions.add(restockTrx);
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Stok ${chosenProduct!.name} berhasil ditambah sebanyak $addStock Pcs!')),
+                  );
+                },
+                child: const Text('Simpan Kulakan'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ================= 4. HALAMAN KONSINYASI / SALES =================
+  Widget buildConsignmentReportPage() {
+    List<Product> consignmentProducts = products.where((p) => p.isConsignment).toList();
+
+    return Scaffold(
+      body: consignmentProducts.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24.0),
+                child: Text(
+                  'Belum ada barang titipan sales (konsinyasi).',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            )
+          : ListView.builder(
+              itemCount: consignmentProducts.length,
+              itemBuilder: (context, index) {
+                final prod = consignmentProducts[index];
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  elevation: 3,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: Colors.orange[100], borderRadius: BorderRadius.circular(6)),
+                              child: Text('Sales: ${prod.salesName}', style: TextStyle(color: Colors.orange[900], fontWeight: FontWeight.bold, fontSize: 11)),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 12),
+                        Text('Sisa Stok di Toko: ${prod.getFormattedStock()}', style: const TextStyle(fontSize: 13)),
+                        Text('Harga Setoran (Modal ke Sales): ${currencyFormatter.format(prod.buyPrice)} per utuh', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue[700], foregroundColor: Colors.white),
+                              onPressed: () => showSalesSettlementDialog(prod),
+                              icon: const Icon(Icons.sync, size: 16),
+                              label: const Text('Sales Datang / Retur Ganti Baru'),
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  void showSalesSettlementDialog(Product prod) {
+    TextEditingController physicalStockCtrl = TextEditingController(text: prod.stock.toString());
+    TextEditingController newStockCtrl = TextEditingController(text: '0');
+    TextEditingController staffCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          int physicalStock = int.tryParse(physicalStockCtrl.text) ?? prod.stock;
+          int soldStock = prod.stock - physicalStock;
+          if (soldStock < 0) soldStock = 0;
+
+          double buyPerSmallUnit = prod.buyPrice / (prod.retailConversion > 0 ? prod.retailConversion : 1);
+          double totalPayToSales = soldStock * buyPerSmallUnit;
+
+          int restockAmount = int.tryParse(newStockCtrl.text) ?? 0;
+
+          return AlertDialog(
+            title: Text('Kunjungan Sales: ${prod.salesName}'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Barang: ${prod.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Stok Tercatat di Sistem: ${prod.stock} Pcs'),
+                  const Divider(height: 20),
+                  TextField(controller: staffCtrl, decoration: const InputDecoration(labelText: 'Nama Kasir *', border: OutlineInputBorder(), isDense: true)),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: physicalStockCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Sisa Fisik Barang Sekarang', border: OutlineInputBorder()),
+                    onChanged: (val) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green.shade200)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Estimasi Terjual: $soldStock Pcs', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                        const SizedBox(height: 4),
+                        Text('Uang Setoran ke Sales: ${currencyFormatter.format(totalPayToSales)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green[850])),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: newStockCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Tambah Stok Baru dari Sales (Restock)', border: OutlineInputBorder()),
+                    onChanged: (val) => setDialogState(() {}),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white),
+                onPressed: () {
+                  if (staffCtrl.text.isEmpty) return;
+
+                  setState(() {
+                    prod.stock = physicalStock + restockAmount;
+                  });
+                  saveProductToGoogleSheets(prod);
+
+                  TransactionRecord salesTrx = TransactionRecord(
+                    id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
+                    date: DateTime.now(),
+                    items: [],
+                    subtotal: totalPayToSales,
+                    discount: 0,
+                    tax: 0,
+                    total: totalPayToSales,
+                    payAmount: totalPayToSales,
+                    change: 0,
+                    customNetProfit: 0,
+                    itemsSummary: "Setoran Sales [${prod.salesName}] - ${prod.name} (Terjual: $soldStock)",
+                    staffName: staffCtrl.text,
+                    paymentType: 'Setoran Sales Titipan',
+                  );
+                  saveTransactionToGoogleSheets(salesTrx);
+                  transactions.add(salesTrx);
+
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Setoran ke sales berhasil dicatat!')));
+                },
+                child: const Text('Selesaikan & Bayar Sales'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ================= 5. HALAMAN KASBON =================
   Widget buildDebtPage() {
     Map<String, List<DebtRecord>> groupedDebts = {};
     for (var d in debts) {
@@ -1520,10 +1911,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Batal')),
               ElevatedButton(
                 onPressed: () {
-                  if (staffCtrl.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Isi Nama Kasir!')));
-                    return;
-                  }
+                  if (staffCtrl.text.isEmpty) return;
                   double finalPayAmount = paymentType == 'QRIS' ? totalDebt : (double.tryParse(payCtrl.text) ?? 0);
                   if (finalPayAmount <= 0) return;
 
@@ -1729,7 +2117,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: 'Struk_Nota_${trx.id}.pdf');
   }
 
-  // ================= 4. HALAMAN LAPORAN =================
+  // ================= 6. HALAMAN LAPORAN =================
   Widget buildHistoryPage() {
     DateTime now = DateTime.now();
 
