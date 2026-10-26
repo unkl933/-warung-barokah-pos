@@ -233,11 +233,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
   List<TransactionRecord> transactions = [];
   List<DebtRecord> debts = [];
 
-  TextEditingController searchKasirController = TextEditingController();
+  final TextEditingController searchKasirController = TextEditingController();
   String searchKasirQuery = '';
   String selectedCategory = 'Semua';
 
-  TextEditingController searchMasterController = TextEditingController();
+  final TextEditingController searchMasterController = TextEditingController();
   String searchMasterQuery = '';
   String productSortOption = 'Default';
 
@@ -258,6 +258,14 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     Future.microtask(() {
       fetchAllDataFromGoogleSheets();
     });
+  }
+
+  @override
+  void dispose() {
+    searchKasirController.dispose();
+    searchMasterController.dispose();
+    audioPlayer.dispose();
+    super.dispose();
   }
 
   void fetchAllDataFromGoogleSheets() {
@@ -460,7 +468,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     final List<Widget> pages = [
       buildKasirPage(),
       buildProductManagementPage(),
-      buildRestockPage(), // Menu Baru: Belanja Ulang / Kulakan Stok
+      buildRestockPage(),
       buildConsignmentReportPage(),
       buildDebtPage(),
       buildHistoryPage(),
@@ -517,7 +525,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.shopping_cart), label: 'Kasir'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory_2), label: 'Produk'),
-          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Belanja'), // Menu Belanja Ulang
+          BottomNavigationBarItem(icon: Icon(Icons.shopping_bag), label: 'Belanja'),
           BottomNavigationBarItem(icon: Icon(Icons.local_shipping), label: 'Sales'),
           BottomNavigationBarItem(icon: Icon(Icons.book_online), label: 'Kasbon'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'Laporan'),
@@ -1228,7 +1236,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                             ],
                           ),
                           subtitle: Text(
-                              'Kategori: ${prod.category} | Jual: ${currencyFormatter.format(prod.price)}\nStok: ${prod.getFormattedStock()}'),
+                              'Kategori: ${prod.category} | Jual: ${currencyFormatter.format(prod.price)}\nStok: ${prod.getFormattedStock()}${prod.hasHalfPrice ? ' | 1/2: ${currencyFormatter.format(prod.halfPrice)}' : ''}${prod.hasQuarterPrice ? ' | 1/4: ${currencyFormatter.format(prod.quarterPrice)}' : ''}'),
                           isThreeLine: true,
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1261,7 +1269,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
     
     TextEditingController retailNameCtrl = TextEditingController(text: isEdit ? product.retailName : '');
-    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '1');
+    TextEditingController retailConvCtrl = TextEditingController(text: isEdit ? product.retailConversion.toString() : '');
     TextEditingController retailPriceCtrl = TextEditingController(text: isEdit ? product.retailPrice.toInt().toString() : '');
     
     bool isConsignment = isEdit ? product.isConsignment : false;
@@ -1362,7 +1370,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     );
   }
 
-  // ================= 3. HALAMAN KULAKAN / BELANJA ULANG (RESTOCK) =================
+  // ================= 3. HALAMAN KULAKAN / BELANJA ULANG =================
   Widget buildRestockPage() {
     List<Product> lowStockProducts = products.where((p) => p.stock < 10 && !p.isConsignment).toList();
 
@@ -1411,7 +1419,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                       },
                     ),
             ),
-            // Tombol kulakan bebas untuk produk apa saja
             Center(
               child: Padding(
                 padding: const EdgeInsets.all(8.0),
@@ -1503,7 +1510,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                   });
                   saveProductToGoogleSheets(chosenProduct!);
 
-                  // Catat sebagai pengeluaran kulakan di laporan transaksi
                   TransactionRecord restockTrx = TransactionRecord(
                     id: DateTime.now().millisecondsSinceEpoch.toString().substring(7),
                     date: DateTime.now(),
@@ -1514,7 +1520,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                     total: totalCost,
                     payAmount: totalCost,
                     change: 0,
-                    customNetProfit: -totalCost, // Dicatat sebagai pengeluaran modal
+                    customNetProfit: -totalCost,
                     itemsSummary: "Kulakan/Belanja Ulang: ${chosenProduct!.name} (+ $addStock Pcs)",
                     staffName: staffCtrl.text,
                     paymentType: 'Kulakan / Restock',
