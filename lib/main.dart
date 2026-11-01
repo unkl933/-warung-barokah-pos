@@ -517,7 +517,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 Text('Warung Barokah',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
                 Text('Kiarajangkung',
-                    style: TextStyle(fontSize: 11, color: Colors.white80)),
+                    style: TextStyle(fontSize: 11, color: Colors.white70)),
               ],
             ),
           ],
@@ -578,7 +578,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     return categories.toList();
   }
 
-  // ================= 1. HALAMAN KASIR (Tampilan Berbasis Teks Modern - Gambar 1) =================
+  // ================= 1. HALAMAN KASIR =================
   Widget buildKasirPage() {
     double subtotal = cart.fold(0, (sum, item) => sum + item.totalPrice);
     int totalItemsCount = cart.fold(0, (sum, item) => sum + item.quantity);
@@ -595,7 +595,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
       children: [
         Column(
           children: [
-            // Search Bar & Scan Button
             Container(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
               color: const Color(0xFFF4FDF4),
@@ -666,7 +665,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
               ),
             ),
             
-            // Kategori Chips Horizontal
             SizedBox(
               height: 40,
               child: ListView.builder(
@@ -703,7 +701,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             ),
             const SizedBox(height: 6),
             
-            // Daftar Produk (Full Height, Ringan, Tanpa Gambar)
             Expanded(
               child: filteredProducts.isEmpty
                   ? const Center(
@@ -716,7 +713,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         final prod = filteredProducts[index];
                         int cartQty = getCartQtyForProduct(prod);
 
-                        // Mengambil inisial produk (2 huruf)
                         String initial = prod.name.trim().length >= 2 
                             ? prod.name.trim().substring(0, 2).toUpperCase() 
                             : prod.name.trim().toUpperCase();
@@ -818,7 +814,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           ],
         ),
 
-        // Floating Cart Summary Bar (Melayang di bawah)
         if (cart.isNotEmpty)
           Positioned(
             left: 12,
@@ -931,7 +926,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           builder: (context, setSheetState) {
             return Container(
               padding: const EdgeInsets.all(16),
-              maxHeight: MediaQuery.of(context).size.height * 0.7,
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2315,7 +2312,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
               ),
               pw.Column(
-                cross: pw.CrossAxisAlignment.start,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Center(
                     child: pw.Column(
@@ -2384,7 +2381,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                 ),
               ),
               pw.Column(
-                cross: pw.CrossAxisAlignment.start,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Center(
                     child: pw.Column(
