@@ -10,6 +10,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,37 +40,6 @@ class WarungBarokahApp extends StatelessWidget {
           backgroundColor: Color(0xFF10B981),
           foregroundColor: Colors.white,
           elevation: 0,
-        ),
-        cardTheme: CardThemeData(
-          color: Colors.white,
-          elevation: 1,
-          margin: const EdgeInsets.symmetric(vertical: 5),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF10B981), width: 1.5),
-          ),
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: Color(0xFF10B981),
-          foregroundColor: Colors.white,
         ),
       ),
       home: const MainHomeScreen(),
@@ -268,10 +238,6 @@ class MainHomeScreen extends StatefulWidget {
 
 class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
-  int _selectedModule = 0;
-  bool _showMainMenu = false;
-  final Map<String, List<Map<String, dynamic>>> _moduleRecords = {};
-  final Set<String> _moduleLoading = {};
 
   List<Product> products = [];
   List<CartItem> cart = [];
@@ -302,9 +268,6 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     super.initState();
     Future.microtask(() {
       fetchAllDataFromGoogleSheets();
-      for (final key in ['LPG', 'DEPOT', 'GABAH', 'BENSIN']) {
-        _loadModuleRecords(key);
-      }
     });
   }
 
@@ -445,55 +408,29 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
-  // Apps Script ContentService sering mengembalikan HTTP 302 ke URL
-  // script.googleusercontent.com. Ikuti redirect secara eksplisit agar
-  // respons JSON dari Apps Script tetap dapat dibaca oleh Flutter.
-  Future<http.Response> _postToAppsScript(Map<String, dynamic> payload) async {
-    final client = http.Client();
-    try {
-      final request = http.Request('POST', Uri.parse(googleSheetUrl))
-        ..followRedirects = false
-        ..headers['Content-Type'] = 'application/json; charset=utf-8'
-        ..headers['Accept'] = 'application/json'
-        ..body = json.encode(payload);
-
-      var response = await client.send(request);
-      var result = await http.Response.fromStream(response);
-
-      if ([301, 302, 303, 307, 308].contains(result.statusCode)) {
-        final location = result.headers['location'];
-        if (location == null || location.isEmpty) {
-          throw Exception('HTTP ${result.statusCode}: alamat redirect Google tidak tersedia');
-        }
-        final redirectedUri = Uri.parse(googleSheetUrl).resolve(location);
-        result = await client.get(redirectedUri, headers: {'Accept': 'application/json'});
-      }
-
-      if (result.statusCode != 200) {
-        throw Exception('HTTP ${result.statusCode}');
-      }
-      try {
-        json.decode(result.body);
-      } catch (_) {
-        throw Exception('Respons Google Apps Script bukan JSON. Periksa akses deployment Web App (Anyone) dan URL /exec.');
-      }
-      return result;
-    } finally {
-      client.close();
-    }
-  }
-
   Future<void> saveProductToGoogleSheets(Product product) async {
     try {
-      await _postToAppsScript({
-        "action": "saveProduct", "id": product.id, "name": product.name,
-        "category": product.category, "buyPrice": product.buyPrice,
-        "price": product.price, "halfPrice": product.halfPrice,
-        "quarterPrice": product.quarterPrice, "stock": product.stock,
-        "retailName": product.retailName, "retailConversion": product.retailConversion,
-        "retailPrice": product.retailPrice, "barcode": product.barcode,
-        "isConsignment": product.isConsignment, "salesName": product.salesName,
-      });
+      await http.post(
+        Uri.parse(googleSheetUrl),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "action": "saveProduct",
+          "id": product.id,
+          "name": product.name,
+          "category": product.category,
+          "buyPrice": product.buyPrice,
+          "price": product.price,
+          "halfPrice": product.halfPrice,
+          "quarterPrice": product.quarterPrice,
+          "stock": product.stock,
+          "retailName": product.retailName,
+          "retailConversion": product.retailConversion,
+          "retailPrice": product.retailPrice,
+          "barcode": product.barcode,
+          "isConsignment": product.isConsignment,
+          "salesName": product.salesName,
+        }),
+      );
     } catch (e) {
       print("Gagal menyimpan produk: $e");
     }
@@ -501,17 +438,27 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   Future<void> saveTransactionToGoogleSheets(TransactionRecord trx) async {
     try {
-      final itemsSummary = trx.items
+      String itemsSummary = trx.items
           .map((i) => "${i.product.name} (${i.quantity} ${i.unitLabel})")
           .join(", ");
-      await _postToAppsScript({
-        "action": "saveTransaction", "id": trx.id,
-        "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(trx.date),
-        "subtotal": trx.subtotal, "discount": trx.discount, "tax": trx.tax,
-        "total": trx.total, "netProfit": trx.netProfit,
-        "itemsSummary": itemsSummary, "staffName": trx.staffName,
-        "paymentType": trx.paymentType,
-      });
+
+      await http.post(
+        Uri.parse(googleSheetUrl),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "action": "saveTransaction",
+          "id": trx.id,
+          "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(trx.date),
+          "subtotal": trx.subtotal,
+          "discount": trx.discount,
+          "tax": trx.tax,
+          "total": trx.total,
+          "netProfit": trx.netProfit,
+          "itemsSummary": itemsSummary,
+          "staffName": trx.staffName,
+          "paymentType": trx.paymentType,
+        }),
+      );
     } catch (e) {
       print("Gagal menyimpan transaksi: $e");
     }
@@ -519,255 +466,140 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   Future<void> saveDebtToGoogleSheets(DebtRecord debt) async {
     try {
-      await _postToAppsScript({
-        "action": "saveDebt", "id": debt.id,
-        "customerName": debt.customerName, "staffName": debt.staffName,
-        "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(debt.date),
-        "totalAmount": debt.totalAmount, "paidAmount": debt.paidAmount,
-        "remainingAmount": debt.remainingAmount, "status": debt.status,
-        "itemsSummary": debt.itemsSummary, "settlementHistory": debt.settlementHistory,
-      });
+      await http.post(
+        Uri.parse(googleSheetUrl),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({
+          "action": "saveDebt",
+          "id": debt.id,
+          "customerName": debt.customerName,
+          "staffName": debt.staffName,
+          "date": DateFormat('yyyy-MM-dd HH:mm:ss').format(debt.date),
+          "totalAmount": debt.totalAmount,
+          "paidAmount": debt.paidAmount,
+          "remainingAmount": debt.remainingAmount,
+          "status": debt.status,
+          "itemsSummary": debt.itemsSummary,
+          "settlementHistory": debt.settlementHistory,
+        }),
+      );
     } catch (e) {
       print("Gagal menyimpan kasbon: $e");
     }
   }
 
-  String _moduleKeyForIndex(int index) => const {2:'LPG',3:'DEPOT',4:'GABAH',5:'BENSIN'}[index] ?? 'LPG';
-
-  List<String> _moduleTypes(String key) {
-    switch (key) {
-      case 'LPG': return ['Pembelian Agen','Penjualan Tabung','Pembayaran Piutang','Retur Tabung','Penyesuaian Stok'];
-      case 'DEPOT': return ['Pembelian Galon','Penjualan Isi Ulang','Penjualan Galon','Pembelian Tutup','Pembelian Tisu','Retur Galon','Galon Pecah','Penyesuaian Stok'];
-      case 'GABAH': return ['Pembelian Petani','Pembelian Tengkulak','Penjualan Pabrik','DP ke Petani','DP ke Tengkulak','DP dari Pabrik','Pelunasan Pembelian','Pelunasan Penjualan'];
-      default: return ['Pembelian BBM','Penjualan BBM','Penyesuaian Stok'];
-    }
-  }
-
-  Future<void> _loadModuleRecords(String key) async {
-    if (_moduleLoading.contains(key)) return;
-    setState(() => _moduleLoading.add(key));
-    try {
-      final uri = Uri.parse('$googleSheetUrl?action=getModuleData&module=$key');
-      final response = await http.get(uri);
-      if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        if (decoded is List) _moduleRecords[key] = decoded.cast<Map<String, dynamic>>();
-      }
-    } catch (e) { debugPrint('Gagal memuat modul $key: $e'); }
-    if (mounted) setState(() => _moduleLoading.remove(key));
-  }
-
-  double _moduleBalance(String key) {
-    final rows = _moduleRecords[key] ?? [];
-    double balance = 0;
-    for (final r in rows) {
-      final type = (r['type'] ?? '').toString().toLowerCase();
-      final qty = (r['qty'] as num?)?.toDouble() ?? 0;
-      if (type.contains('pembelian') || type.contains('dp dari pabrik')) balance += qty;
-      if (type.contains('penjualan') || type.contains('retur') || type.contains('dp ke ')) balance -= qty;
-    }
-    return balance;
-  }
-
-  double _moduleSales(String key) => (_moduleRecords[key] ?? []).where((r) => (r['type'] ?? '').toString().toLowerCase().contains('penjualan')).fold<double>(0, (v,r) => v + ((r['total'] as num?)?.toDouble() ?? 0));
-
-  Future<void> _moduleForm(String key, {Map<String,dynamic>? existing}) async {
-    final types = _moduleTypes(key);
-    String type = (existing?['type'] ?? types.first).toString();
-    final party = TextEditingController(text: existing?['party']?.toString() ?? '');
-    final desc = TextEditingController(text: existing?['description']?.toString() ?? '');
-    final qty = TextEditingController(text: existing?['qty']?.toString() ?? '1');
-    final unit = TextEditingController(text: existing?['unit']?.toString() ?? (key=='GABAH'?'Kg':key=='BENSIN'?'Liter':key=='LPG'?'Tabung':'Pcs'));
-    final buy = TextEditingController(text: existing?['buyPrice']?.toString() ?? '0');
-    final sell = TextEditingController(text: existing?['sellPrice']?.toString() ?? '0');
-    final payment = TextEditingController(text: existing?['payment']?.toString() ?? 'Tunai');
-    final status = TextEditingController(text: existing?['status']?.toString() ?? 'Lunas');
-    final extra = TextEditingController(text: existing?['extra']?.toString() ?? '');
-    final formKey = GlobalKey<FormState>();
-    await showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx,setDialog) => AlertDialog(
-      title: Text(existing==null?'Catat $key':'Ubah catatan $key'),
-      content: SizedBox(width: 480, child: SingleChildScrollView(child: Form(key:formKey, child: Column(mainAxisSize:MainAxisSize.min, children:[
-        DropdownButtonFormField<String>(value:type, isExpanded:true, decoration:const InputDecoration(labelText:'Jenis transaksi'), items:types.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v){if(v!=null)setDialog(()=>type=v);}),
-        TextFormField(controller:party, decoration:InputDecoration(labelText:key=='LPG'?'Agen / pembeli / warung':key=='GABAH'?'Nama petani / tengkulak / pabrik':'Pemasok / pembeli'), validator:(v)=>v==null||v.trim().isEmpty?'Wajib diisi':null),
-        TextFormField(controller:desc, decoration:InputDecoration(labelText:key=='LPG'?'Varian LPG (3 kg / 5,5 kg / 12 kg)':key=='GABAH'?'Nomor pengiriman / rincian timbangan':'Nama barang / keterangan')),
-        Row(children:[Expanded(child:TextFormField(controller:qty,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Jumlah / berat'),validator:(v)=>double.tryParse((v??'').replaceAll(',','.'))==null?'Angka tidak valid':null)),const SizedBox(width:8),Expanded(child:TextFormField(controller:unit,decoration:const InputDecoration(labelText:'Satuan')))]),
-        Row(children:[Expanded(child:TextFormField(controller:buy,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga beli / satuan'))),const SizedBox(width:8),Expanded(child:TextFormField(controller:sell,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga jual / satuan')))]),
-        Row(children:[Expanded(child:TextFormField(controller:payment,decoration:const InputDecoration(labelText:'Metode bayar (Tunai/QRIS/Transfer/Utang)'))),const SizedBox(width:8),Expanded(child:TextFormField(controller:status,decoration:const InputDecoration(labelText:'Status (Lunas/Utang/DP)')))]),
-        TextFormField(controller:extra,maxLines:3,decoration:InputDecoration(labelText:key=='GABAH'?'Rincian karung/timbangan/DP/saldo':key=='LPG'?'NIK opsional, alamat, harga khusus':'Catatan tambahan')),
-      ])))),
-      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:() async {
-        if(!formKey.currentState!.validate())return;
-        final q=double.parse(qty.text.replaceAll(',','.'));
-        final bp=double.tryParse(buy.text.replaceAll('.',''))??0;
-        final sp=double.tryParse(sell.text.replaceAll('.',''))??0;
-        final isSale=type.toLowerCase().contains('penjualan');
-        final record={'action':'saveModuleRecord','module':key,'id':existing?['id']??DateTime.now().microsecondsSinceEpoch.toString(),'date':existing?['date']??DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),'type':type,'party':party.text.trim(),'description':desc.text.trim(),'qty':q,'unit':unit.text.trim(),'buyPrice':bp,'sellPrice':sp,'total':q*(isSale?sp:bp),'payment':payment.text.trim(),'status':status.text.trim(),'extra':extra.text.trim()};
-        try { await _postToAppsScript(record); Navigator.pop(ctx); await _loadModuleRecords(key); if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Catatan tersimpan'))); } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal menyimpan: $e')));}
-      },child:const Text('Simpan'))]
-    )));
-  }
-
-  Future<void> _deleteModuleRecord(String key, String id) async {
-    try { await _postToAppsScript({'action':'deleteModuleRecord','module':key,'id':id}); await _loadModuleRecords(key); } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal menghapus: $e')));}
-  }
-
-  Widget _modulePage(String key, String title, String subtitle, IconData icon, Color color) {
-    if (!_moduleRecords.containsKey(key) && !_moduleLoading.contains(key)) Future.microtask(()=>_loadModuleRecords(key));
-    final rows=_moduleRecords[key]??[];
-    final stock=_moduleBalance(key);
-    return RefreshIndicator(onRefresh:()=>_loadModuleRecords(key),child:ListView(padding:const EdgeInsets.all(14),children:[
-      Row(children:[CircleAvatar(radius:25,backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color,size:28)),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:19)),Text(subtitle,style:TextStyle(color:Colors.grey[600],fontSize:12))])),IconButton(onPressed:()=>_loadModuleRecords(key),icon:const Icon(Icons.refresh))]),
-      const SizedBox(height:12),
-      Wrap(spacing:8,runSpacing:8,children:[_statCard('Jumlah catatan','${rows.length}',Icons.receipt_long,color),_statCard(key=='GABAH'?'Saldo berat':'Stok terhitung','${stock.toStringAsFixed(1)} ${key=='GABAH'?'Kg':key=='BENSIN'?'Liter':key=='LPG'?'Tabung':'Unit'}',Icons.inventory,color),_statCard('Nilai penjualan',currencyFormatter.format(_moduleSales(key)),Icons.payments,color)]),
-      const SizedBox(height:12),
-      if(key=='LPG') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Agen: PT. Mutiara Sri Rengganis dan PT. Petro Lindo Jaya Utama. Varian: LPG 3 kg, 5,5 kg, 12 kg. NIK pembeli opsional; masukkan di catatan bila diperlukan.'))),
-      if(key=='DEPOT') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Harga acuan isi ulang: Rp3.500 dan Rp4.000. Catat tutup, tisu, galon kosong, retur, dan galon pecah sebagai transaksi tersendiri.'))),
-      if(key=='GABAH') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Gunakan kolom catatan untuk rincian setiap penimbangan, jumlah karung, nomor pengiriman, DP yang diberikan/diterima, dan saldo rekonsiliasi. Satu transaksi dapat mewakili satu pengiriman.'))),
-      if(key=='BENSIN') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Catat pembelian dalam liter dan harga modal per liter, lalu catat penjualan untuk menghitung stok dan omzet.'))),
-      Align(alignment:Alignment.centerRight,child:FilledButton.icon(onPressed:()=>_moduleForm(key),icon:const Icon(Icons.add),label:const Text('Tambah Transaksi'))),
-      if(_moduleLoading.contains(key)) const Center(child:Padding(padding:EdgeInsets.all(24),child:CircularProgressIndicator())),
-      if(rows.isEmpty&&!_moduleLoading.contains(key)) const Padding(padding:EdgeInsets.all(30),child:Center(child:Text('Belum ada catatan transaksi.'))),
-      ...rows.reversed.map((r){final id=(r['id']??'').toString();final total=(r['total'] as num?)?.toDouble()??0;return Card(child:ListTile(title:Text('${r['type']??'-'} · ${r['party']??'-'}',style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text('${r['date']??''}\n${r['description']??''} · ${r['qty']??0} ${r['unit']??''}\n${r['payment']??''} / ${r['status']??''}\n${r['extra']??''}'),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='edit')_moduleForm(key,existing:r);if(v=='delete')_deleteModuleRecord(key,id);},itemBuilder:(_)=>const [PopupMenuItem(value:'edit',child:Text('Ubah')),PopupMenuItem(value:'delete',child:Text('Hapus'))]),leading:CircleAvatar(backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color)),));}),
-    ]));
-  }
-
-  Widget _statCard(String label,String value,IconData icon,Color color)=>SizedBox(width:155,child:Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon,color:color),const SizedBox(height:6),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:16)),Text(label,style:const TextStyle(fontSize:11,color:Colors.grey))]))));
-
-  Widget _dashboardPage() {
-    final now = DateTime.now();
-    final today = transactions.where((t) =>
-      t.date.year == now.year && t.date.month == now.month && t.date.day == now.day
-    ).toList();
-    final omzet = today.fold<double>(0, (s, t) => s + t.total);
-    final laba = today.fold<double>(0, (s, t) => s + t.netProfit);
-    final piutang = debts.fold<double>(0, (s, d) => s + d.remainingAmount);
-
-    Widget stat(String label, String value, IconData icon, Color color) =>
-      Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Icon(icon, color: color), const SizedBox(height: 8),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-          Text(label, style: const TextStyle(fontSize: 11))],
-      )));
-
-    Widget module(String title, String sub, IconData icon, int index) =>
-      Card(child: ListTile(leading: Icon(icon, color: const Color(0xFF059669)),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(sub), trailing: const Icon(Icons.chevron_right),
-        onTap: () => setState(() => _selectedModule = index)));
-
-    return RefreshIndicator(onRefresh: () async { fetchAllDataFromGoogleSheets(); for (final key in ['LPG','DEPOT','GABAH','BENSIN']) { await _loadModuleRecords(key); } },
-      child: ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('Dashboard / Beranda', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-        Text(DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(now)),
-        const SizedBox(height: 12),
-        GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2, childAspectRatio: 1.65, crossAxisSpacing: 8, mainAxisSpacing: 8,
-          children: [
-            stat('Omzet Warung hari ini', currencyFormatter.format(omzet), Icons.point_of_sale, Colors.green),
-            stat('Estimasi laba Warung', currencyFormatter.format(laba), Icons.trending_up, Colors.blue),
-            stat('Piutang Warung', currencyFormatter.format(piutang), Icons.account_balance_wallet, Colors.orange),
-            stat('Transaksi hari ini', '${today.length}', Icons.receipt_long, Colors.purple),
-            stat('Stok LPG terhitung', '${_moduleBalance('LPG').toStringAsFixed(0)} tabung', Icons.propane_tank, Colors.blue),
-            stat('Penjualan Depot', currencyFormatter.format(_moduleSales('DEPOT')), Icons.water_drop, Colors.cyan),
-            stat('Penjualan Gabah', currencyFormatter.format(_moduleSales('GABAH')), Icons.grass, Colors.brown),
-            stat('Penjualan Bensin', currencyFormatter.format(_moduleSales('BENSIN')), Icons.local_gas_station, Colors.deepOrange),
-          ]),
-        const SizedBox(height: 16),
-        const Text('Akses Cepat', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          ActionChip(avatar: const Icon(Icons.point_of_sale), label: const Text('Kasir Warung'), onPressed: () => setState(() => _selectedModule = 1)),
-          ActionChip(avatar: const Icon(Icons.propane_tank), label: const Text('Penjualan LPG'), onPressed: () => setState(() => _selectedModule = 2)),
-          ActionChip(avatar: const Icon(Icons.water_drop), label: const Text('Depot Air'), onPressed: () => setState(() => _selectedModule = 3)),
-          ActionChip(avatar: const Icon(Icons.grass), label: const Text('Transaksi Gabah'), onPressed: () => setState(() => _selectedModule = 4)),
-          ActionChip(avatar: const Icon(Icons.local_gas_station), label: const Text('Bensin'), onPressed: () => setState(() => _selectedModule = 5)),
-          ActionChip(avatar: const Icon(Icons.bar_chart), label: const Text('Laporan Warung'), onPressed: () => setState(() => _selectedModule = 1)),
-        ]),
-        const SizedBox(height: 16),
-        const Text('Modul Usaha', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-        module('Warung', 'Kasir, produk, belanja, sales, kasbon, laporan', Icons.storefront, 1),
-        module('Pangkalan GAS LPG', 'LPG 3 Kg, 5,5 Kg, 12 Kg dan dua agen', Icons.propane_tank, 2),
-        module('Depot Isi Ulang Air Mineral', 'Penjualan galon dan perlengkapan', Icons.water_drop, 3),
-        module('Jual Beli Gabah', 'Petani, tengkulak, pabrik, timbangan dan DP', Icons.grass, 4),
-        module('Bensin Eceran', 'Pembelian, penjualan, stok liter dan laporan', Icons.local_gas_station, 5),
-      ]));
-  }
-
-  Widget _warungWorkspace() {
-    return DefaultTabController(length: 6, child: Column(children: [
-      Expanded(child: TabBarView(children: [
-        buildKasirPage(), buildProductManagementPage(), buildRestockPage(),
-        buildConsignmentReportPage(), buildDebtPage(), buildHistoryPage(),
-      ])),
-      Material(color: const Color(0xFFECFDF5), elevation: 8, child: SafeArea(top:false,child:const TabBar(isScrollable:true,
-        labelColor: const Color(0xFF059669), unselectedLabelColor: const Color(0xFF64748B), indicatorColor: const Color(0xFF10B981), tabs: [
-          Tab(icon: Icon(Icons.point_of_sale), text: 'Kasir'),
-          Tab(icon: Icon(Icons.inventory_2), text: 'Produk'),
-          Tab(icon: Icon(Icons.shopping_bag), text: 'Belanja'),
-          Tab(icon: Icon(Icons.local_shipping), text: 'Sales'),
-          Tab(icon: Icon(Icons.book_online), text: 'Kasbon'),
-          Tab(icon: Icon(Icons.history), text: 'Laporan'),
-        ]))),
-    ]));
-  }
-
-  Widget _selectedModulePage() {
-    switch (_selectedModule) {
-      case 0: return _dashboardPage();
-      case 1: return _warungWorkspace();
-      case 2: return _modulePage('LPG','Pangkalan GAS LPG','Pembelian agen, penjualan tabung, stok dan piutang',Icons.propane_tank,Colors.blue);
-      case 3: return _modulePage('DEPOT','Depot Isi Ulang Air Mineral','Penjualan galon, perlengkapan, retur dan galon pecah',Icons.water_drop,Colors.cyan);
-      case 4: return _modulePage('GABAH','Jual Beli Gabah','Pembelian petani/tengkulak, penimbangan pabrik dan DP',Icons.grass,Colors.brown);
-      case 5: return _modulePage('BENSIN','Bensin Eceran','Pembelian liter, penjualan, stok dan laba',Icons.local_gas_station,Colors.deepOrange);
-      default: return _dashboardPage();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final menu = <Map<String, dynamic>>[
-      {'title': 'Dashboard / Beranda', 'icon': Icons.dashboard_outlined},
-      {'title': 'Warung', 'icon': Icons.storefront},
-      {'title': 'Pangkalan GAS LPG', 'icon': Icons.propane_tank},
-      {'title': 'Depot Isi Ulang Air Mineral', 'icon': Icons.water_drop},
-      {'title': 'Jual Beli Gabah', 'icon': Icons.grass},
-      {'title': 'Bensin Eceran', 'icon': Icons.local_gas_station},
+    final List<Widget> pages = [
+      buildKasirPage(),
+      buildProductManagementPage(),
+      buildRestockPage(),
+      buildConsignmentReportPage(),
+      buildDebtPage(),
+      buildHistoryPage(),
     ];
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          tooltip: _showMainMenu ? 'Tutup menu utama' : 'Buka menu utama',
-          icon: Icon(_showMainMenu ? Icons.close : Icons.menu),
-          onPressed: () => setState(() => _showMainMenu = !_showMainMenu),
-        ),
-        title: Row(children: [
-          ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.asset(
-            'assets/images/logo.png', width: 34, height: 34, fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => const Icon(Icons.store, color: Colors.white),
-          )),
-          const SizedBox(width: 10),
-          const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Warung Barokah', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            Text('Manajemen Multi Usaha', style: TextStyle(fontSize: 12, color: Colors.white70)),
-          ]),
-        ]),
-        backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white,
-        actions: [IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh Data Warung',
+          tooltip: 'Menu modul usaha',
+          icon: const Icon(Icons.menu),
           onPressed: () {
-            fetchAllDataFromGoogleSheets();
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Memperbarui data Warung...')));
-          })],
+            showModalBottomSheet(
+              context: context,
+              builder: (ctx) => SafeArea(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    const ListTile(title: Text('Menu Usaha', style: TextStyle(fontWeight: FontWeight.bold))),
+                    ListTile(
+                      leading: const Icon(Icons.storefront, color: Color(0xFF10B981)),
+                      title: const Text('Warung Barokah'),
+                      subtitle: const Text('Kasir dan pengelolaan warung'),
+                      onTap: () => Navigator.pop(ctx),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.propane_tank, color: Color(0xFF10B981)),
+                      title: const Text('Pangkalan GAS LPG'),
+                      subtitle: const Text('Penjualan, stok, tabung, retur dan kasbon'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => LpgModuleScreen(apiUrl: googleSheetUrl)));
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.storefront_rounded, color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Warung Barokah',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                Text('Kiarajangkung',
+                    style: TextStyle(fontSize: 11, color: Colors.white70)),
+              ],
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF10B981),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh Data',
+            onPressed: () {
+              fetchAllDataFromGoogleSheets();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Memperbarui data...')),
+              );
+            },
+          ),
+        ],
       ),
-      body: Row(children: [
-        if (_showMainMenu) AnimatedContainer(duration: const Duration(milliseconds:180), width:230,
-          color:const Color(0xFFECFDF5), child:Column(children:[
-            const Padding(padding:EdgeInsets.all(14),child:Align(alignment:Alignment.centerLeft,child:Text('MENU UTAMA',style:TextStyle(color:Color(0xFF64748B),fontSize:11,fontWeight:FontWeight.bold)))),
-            Expanded(child:ListView.builder(itemCount:menu.length,itemBuilder:(context,i){final selected=_selectedModule==i;final item=menu[i];return Container(margin:const EdgeInsets.symmetric(horizontal:7,vertical:3),decoration:BoxDecoration(color:selected?const Color(0xFFD1FAE5):Colors.transparent,borderRadius:BorderRadius.circular(10)),child:ListTile(dense:true,leading:Icon(item['icon'] as IconData,color:selected?const Color(0xFF059669):const Color(0xFF64748B)),title:Text(item['title'] as String,style:TextStyle(color:selected?const Color(0xFF059669):const Color(0xFF64748B),fontSize:12,fontWeight:selected?FontWeight.bold:FontWeight.normal)),onTap:()=>setState((){_selectedModule=i;_showMainMenu=false;})));})),
-            const Padding(padding:EdgeInsets.all(12),child:Text('WARUNG BAROKAH POS',style:TextStyle(color:Color(0xFF94A3B8),fontSize:10))),
-          ])),
-        const VerticalDivider(width: 1, thickness: 1),
-        Expanded(child: _selectedModulePage()),
-      ]),
+      body: pages[_currentIndex],
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          selectedItemColor: const Color(0xFF10B981),
+          unselectedItemColor: Colors.grey[400],
+          backgroundColor: Colors.white,
+          type: BottomNavigationBarType.fixed,
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+          unselectedLabelStyle: const TextStyle(fontSize: 11),
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.point_of_sale_rounded), label: 'Kasir'),
+            BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined), label: 'Produk'),
+            BottomNavigationBarItem(icon: Icon(Icons.shopping_bag_outlined), label: 'Belanja'),
+            BottomNavigationBarItem(icon: Icon(Icons.local_shipping_outlined), label: 'Sales'),
+            BottomNavigationBarItem(icon: Icon(Icons.menu_book_rounded), label: 'Kasbon'),
+            BottomNavigationBarItem(icon: Icon(Icons.analytics_outlined), label: 'Laporan'),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2278,7 +2110,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           ),
                           title: Text(custName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                           subtitle: Text('Sisa Utang: ${currencyFormatter.format(custTotalDebt)} (${custDebts.length} Nota Kasbon)',
-                              style: TextStyle(color: isAllLunas ? const Color(0xFF059669) : Colors.red[700], fontWeight: FontWeight.w500, fontSize: 12)),
+                              style: TextStyle(color: isAllLunas ? Colors.green[700] : Colors.red[700], fontWeight: FontWeight.w500, fontSize: 12)),
                           children: [
                             Container(
                               color: const Color(0xFFF8FAFC),
@@ -2855,6 +2687,530 @@ class BarcodeScannerScreen extends StatelessWidget {
           }
         },
       ),
+    );
+  }
+}
+
+
+// ============================================================================
+// MODUL PANGKALAN LPG - data terpisah dari POS Warung
+// ============================================================================
+
+const List<String> lpgVariants = ['LPG 3 kg', 'LPG 5,5 kg', 'LPG 12 kg'];
+const List<String> lpgAgents = ['PT. Mutiara Sri Rengganis', 'PT. Petro Lindo Jaya Utama'];
+
+class LpgModuleScreen extends StatefulWidget {
+  final String apiUrl;
+  const LpgModuleScreen({super.key, required this.apiUrl});
+
+  @override
+  State<LpgModuleScreen> createState() => _LpgModuleScreenState();
+}
+
+class _LpgModuleScreenState extends State<LpgModuleScreen> {
+  final Color green = const Color(0xFF10B981);
+  final List<String> tabs = const [
+    'Penjualan', 'Pembelian', 'Pelanggan', 'Stok', 'Retur Gas',
+    'Jumlah Tabung & Peminjaman', 'Kasbon', 'Laporan', 'Riwayat Transaksi'
+  ];
+  int tab = 0;
+  bool loading = false;
+  Map<String, List<Map<String, dynamic>>> data = {};
+  final Map<String, int> initialFull = {};
+  final Map<String, int> initialEmpty = {};
+  final Map<String, double> customerPrices = {};
+  final NumberFormat money = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+
+  List<Map<String, dynamic>> rows(String key) => data[key] ?? [];
+  int n(dynamic v) => (v is num) ? v.toInt() : int.tryParse('$v') ?? 0;
+  double d(dynamic v) => (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0;
+  String dateNow() => DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => loading = true);
+    try {
+      final uri = Uri.parse(widget.apiUrl).replace(queryParameters: {'action': 'getLpgData'});
+      final res = await http.get(uri).timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+      final decoded = json.decode(res.body);
+      if (decoded is! Map) throw Exception('Format data LPG tidak valid');
+      final Map<String, List<Map<String, dynamic>>> parsed = {};
+      decoded.forEach((k, v) {
+        parsed[k.toString()] = (v as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      });
+      if (mounted) setState(() { data = parsed; loading = false; });
+    } catch (e) {
+      if (mounted) setState(() => loading = false);
+      _msg('Gagal memuat data LPG: $e');
+    }
+  }
+
+  Future<void> _commit(List<Map<String, dynamic>> records) async {
+    final client = http.Client();
+    http.Response res;
+    try {
+      final request = http.Request('POST', Uri.parse(widget.apiUrl))
+        ..followRedirects = false
+        ..headers['Content-Type'] = 'application/json'
+        ..body = json.encode({'action': 'lpgCommit', 'records': records});
+      final streamed = await client.send(request).timeout(const Duration(seconds: 40));
+      res = await http.Response.fromStream(streamed);
+      // Apps Script ContentService kadang mengembalikan redirect ke googleusercontent.
+      if (res.statusCode >= 300 && res.statusCode < 400) {
+        final location = res.headers['location'];
+        if (location == null || location.isEmpty) {
+          throw Exception('Apps Script mengembalikan HTTP ${res.statusCode} tanpa Location.');
+        }
+        res = await client.get(Uri.parse(location)).timeout(const Duration(seconds: 40));
+      }
+    } finally {
+      client.close();
+    }
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}: ${res.body}');
+    final result = json.decode(res.body);
+    if (result is Map && result['status'] != 'success') {
+      throw Exception(result['message'] ?? 'Penyimpanan gagal');
+    }
+    await _load();
+  }
+
+  void _msg(String s) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  }
+
+  Map<String, int> _stock(String variant) {
+    int full = 0, empty = 0, quarantine = 0, borrowed = 0, inTransit = 0;
+    for (final r in rows('LPG_MutasiStok')) {
+      if ((r['variant'] ?? '') != variant) continue;
+      final type = r['type'] ?? '';
+      final qty = n(r['qty']);
+      switch (type) {
+        case 'OPEN_FULL': full += qty; break;
+        case 'OPEN_EMPTY': empty += qty; break;
+        case 'PURCHASE_FULL': full += qty; break;
+        case 'SALE_FULL': full -= qty; break;
+        case 'SALE_EMPTY_IN': empty += qty; break;
+        case 'PURCHASE_EMPTY_OUT': empty -= qty; break;
+        case 'BORROW_EMPTY': empty -= qty; borrowed += qty; break;
+        case 'RETURN_BORROW_EMPTY': empty += qty; borrowed -= qty; break;
+        case 'CUSTOMER_LEAK_RETURN': full -= qty; quarantine += qty; break;
+        case 'AGENT_LEAK_RETURN': quarantine -= qty; inTransit += qty; break;
+        case 'AGENT_REPLACEMENT_FULL': full += qty; break;
+        case 'AGENT_REPLACEMENT_RECEIVED': inTransit -= qty; break;
+        case 'MANUAL_FULL': full += n(r['delta']); break;
+        case 'MANUAL_EMPTY': empty += n(r['delta']); break;
+      }
+    }
+    return {'full': full, 'empty': empty, 'quarantine': quarantine, 'borrowed': borrowed, 'inTransit': inTransit};
+  }
+
+  int _sum(String key) => rows(key).length;
+  List<Map<String, dynamic>> get customers => rows('LPG_Pelanggan');
+  String _customerName(Map<String, dynamic> c) => '${c['name'] ?? ''}';
+
+  Future<void> _saleDialog() async {
+    String variant = lpgVariants.first, customer = 'Umum / Walk-in', payment = 'Tunai';
+    final qtyC = TextEditingController(text: '1');
+    final priceC = TextEditingController(text: '16000');
+    final paidC = TextEditingController(text: '16000');
+    final buyerC = TextEditingController();
+    final nikC = TextEditingController();
+    final staffC = TextEditingController();
+    final emptyC = TextEditingController(text: '1');
+    final qrisC = TextEditingController(text: '0');
+    final cashC = TextEditingController(text: '0');
+    final debtC = TextEditingController(text: '0');
+    await showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+      final qty = n(qtyC.text), price = d(priceC.text), total = qty * price;
+      final paid = payment == 'Tunai' ? d(paidC.text) : payment == 'QRIS' ? total : payment == 'Split Bill' ? d(cashC.text) + d(qrisC.text) : payment == 'Kasbon Penuh' ? 0 : d(paidC.text);
+      final remaining = (total - paid).clamp(0, total);
+      return AlertDialog(
+        title: const Text('Penjualan LPG'),
+        content: SizedBox(width: 460, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(value: variant, decoration: const InputDecoration(labelText: 'Jenis LPG'), items: lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v){setD(()=>variant=v!);}),
+          DropdownButtonFormField<String>(value: customer, decoration: const InputDecoration(labelText: 'Pelanggan'), items: ['Umum / Walk-in', ...customers.map(_customerName)].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v){
+            setD(()=>customer=v!);
+            final matched = customers.where((x)=>_customerName(x)==v).toList();
+            final c = matched.isEmpty ? null : matched.first;
+            if(c!=null){ final p=d(c['price_${variant.replaceAll(RegExp(r'[^0-9]'), '')}']); if(p>0) priceC.text=p.toStringAsFixed(0); }
+          }),
+          TextField(controller: buyerC, decoration: const InputDecoration(labelText: 'Nama pembeli (opsional)')),
+          TextField(controller: nikC, decoration: const InputDecoration(labelText: 'NIK (opsional)')),
+          TextField(controller: qtyC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah tabung isi')),
+          TextField(controller: priceC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga per tabung')),
+          TextField(controller: emptyC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tabung kosong diterima (wajib sama dengan jumlah jual)')),
+          Text('Total: ${money.format(total)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+          DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pembayaran'), items: ['Tunai','QRIS','Split Bill','Kasbon Penuh','Kasbon Sebagian'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v)=>setD(()=>payment=v!)),
+          if(payment=='Tunai' || payment=='Kasbon Sebagian') TextField(controller:paidC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Uang diterima')),
+          if(payment=='Split Bill') ...[
+            TextField(controller:cashC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Bagian tunai')),
+            TextField(controller:qrisC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Bagian QRIS')),
+          ],
+          if(payment=='QRIS' || (payment=='Split Bill' && d(qrisC.text)>0)) Padding(padding:const EdgeInsets.all(8),child:GestureDetector(onTap:()=>showDialog(context:ctx,builder:(c)=>Dialog(child:InteractiveViewer(child:Image.asset('assets/images/qris.png')))),child:Image.asset('assets/images/qris.png',height:130,errorBuilder:(_,__,___)=>const Text('QRIS: assets/images/qris.png')))),
+          if(payment.startsWith('Kasbon')) Text('Sisa kasbon: ${money.format(remaining)}'),
+          TextField(controller:staffC,decoration:const InputDecoration(labelText:'Nama kasir/petugas')),
+        ]))),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),
+          FilledButton(onPressed:() async {
+            final q=n(qtyC.text), empty=n(emptyC.text);
+            final st=_stock(variant);
+            if(q<=0 || empty!=q){_msg('Penjualan wajib tukar tabung kosong sejumlah tabung isi yang dijual.');return;}
+            if(st['full']!<q){_msg('Stok LPG isi tidak mencukupi.');return;}
+            if(payment=='Split Bill' && (d(cashC.text)+d(qrisC.text)-total).abs()>0.5){_msg('Tunai + QRIS harus sama dengan total.');return;}
+            if(payment=='Tunai' && d(paidC.text)<total){_msg('Pembayaran tunai kurang. Gunakan Kasbon Sebagian jika belum lunas.');return;}
+            if(payment=='Kasbon Sebagian' && (d(paidC.text)<=0 || d(paidC.text)>=total)){_msg('Isi pembayaran sebagian yang valid.');return;}
+            final id='LPG-${DateTime.now().millisecondsSinceEpoch}';
+            final now=dateNow();
+            final paidNow=payment=='Tunai'?total:payment=='QRIS'?total:payment=='Split Bill'?total:payment=='Kasbon Penuh'?0:d(paidC.text);
+            final records=[
+              {'sheet':'LPG_Penjualan','id':id,'date':now,'variant':variant,'customer':customer,'buyer':buyerC.text,'nik':nikC.text,'qty':q,'unitPrice':priceC.text,'total':total,'payment':payment,'paid':paidNow,'remaining':total-paidNow,'staff':staffC.text,'emptyReceived':empty},
+              {'sheet':'LPG_MutasiStok','id':'$id-FULL','date':now,'variant':variant,'type':'SALE_FULL','qty':q,'note':'Penjualan $id'},
+              {'sheet':'LPG_MutasiStok','id':'$id-EMPTY','date':now,'variant':variant,'type':'SALE_EMPTY_IN','qty':empty,'note':'Tabung kosong dari pelanggan $id'},
+              {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Penjualan LPG','description':'$q $variant kepada $customer; total ${money.format(total)}','by':staffC.text},
+            ];
+            if (payment == 'Tunai' || payment == 'QRIS') {
+              records.add({'sheet':'LPG_Pembayaran','id':'$id-PAY','date':now,'saleId':id,'customer':customer,'amount':total,'method':payment,'staff':staffC.text});
+            } else if (payment == 'Split Bill') {
+              if (d(cashC.text)>0) records.add({'sheet':'LPG_Pembayaran','id':'$id-CASH','date':now,'saleId':id,'customer':customer,'amount':d(cashC.text),'method':'Tunai','staff':staffC.text});
+              if (d(qrisC.text)>0) records.add({'sheet':'LPG_Pembayaran','id':'$id-QRIS','date':now,'saleId':id,'customer':customer,'amount':d(qrisC.text),'method':'QRIS','staff':staffC.text});
+            } else if (payment == 'Kasbon Sebagian' && paidNow>0) {
+              records.add({'sheet':'LPG_Pembayaran','id':'$id-PART','date':now,'saleId':id,'customer':customer,'amount':paidNow,'method':'Tunai','staff':staffC.text});
+            }
+            if(total-paidNow>0) records.add({'sheet':'LPG_Kasbon','id':'$id-DEBT','date':now,'customer':customer,'saleId':id,'total':total,'paid':paidNow,'remaining':total-paidNow,'status':'Belum Lunas'});
+            try{await _commit(records);if(ctx.mounted)Navigator.pop(ctx);_msg('Penjualan LPG tersimpan.');}catch(e){_msg('Gagal menyimpan: $e');}
+          },child:const Text('Simpan Penjualan'))
+        ],
+      );
+    }));
+  }
+
+  Future<void> _purchaseDialog() async {
+    String variant=lpgVariants.first, agent=lpgAgents.first, payment='Tunai';
+    final qty=TextEditingController(text:'1'), price=TextEditingController(), emptyOut=TextEditingController(text:'0'), staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
+      title:const Text('Pembelian LPG dari Agen'),
+      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        DropdownButtonFormField(value:agent,items:lpgAgents.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Agen'),onChanged:(v)=>setD(()=>agent=v!)),
+        DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis LPG'),onChanged:(v)=>setD(()=>variant=v!)),
+        TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah tabung isi diterima')),
+        TextField(controller:price,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga beli per tabung')),
+        TextField(controller:emptyOut,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung kosong diserahkan ke agen')),
+        DropdownButtonFormField(value:payment,items:['Tunai','QRIS','Transfer'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Metode pembayaran'),onChanged:(v)=>setD(()=>payment=v!)),
+        TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas')),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+        final q=n(qty.text), e=n(emptyOut.text), st=_stock(variant);
+        if(q<=0 || d(price.text)<=0){_msg('Jumlah dan harga pembelian harus valid.');return;}
+        if(st['empty']!<e){_msg('Stok tabung kosong tidak cukup untuk diserahkan ke agen.');return;}
+        final id='BELI-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
+        try{await _commit([
+          {'sheet':'LPG_Pembelian','id':id,'date':now,'agent':agent,'variant':variant,'qty':q,'unitPrice':d(price.text),'total':q*d(price.text),'payment':payment,'emptyToAgent':e,'staff':staff.text},
+          {'sheet':'LPG_MutasiStok','id':'$id-F','date':now,'variant':variant,'type':'PURCHASE_FULL','qty':q,'note':'Pembelian dari $agent'},
+          if(e>0) {'sheet':'LPG_MutasiStok','id':'$id-E','date':now,'variant':variant,'type':'PURCHASE_EMPTY_OUT','qty':e,'note':'Tabung kosong diserahkan ke agen'},
+        ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Pembelian tersimpan.');}catch(x){_msg('Gagal: $x');}
+      },child:const Text('Simpan Pembelian'))]
+    )));
+  }
+
+  Future<void> _customerDialog() async {
+    final name=TextEditingController(), owner=TextEditingController(), address=TextEditingController(), wa=TextEditingController(), p3=TextEditingController(text:'16000'), p55=TextEditingController(text:'0'), p12=TextEditingController(text:'0');
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('Tambah Pelanggan LPG'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+      TextField(controller:name,decoration:const InputDecoration(labelText:'Nama warung/pelanggan')),
+      TextField(controller:owner,decoration:const InputDecoration(labelText:'Nama pemilik')),
+      TextField(controller:address,decoration:const InputDecoration(labelText:'Alamat/area')),
+      TextField(controller:wa,decoration:const InputDecoration(labelText:'Nomor WhatsApp')),
+      TextField(controller:p3,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga LPG 3 kg')),
+      TextField(controller:p55,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga LPG 5,5 kg')),
+      TextField(controller:p12,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga LPG 12 kg')),
+    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      if(name.text.trim().isEmpty){_msg('Nama pelanggan wajib diisi.');return;}
+      final id='C-${DateTime.now().millisecondsSinceEpoch}';
+      try{await _commit([{'sheet':'LPG_Pelanggan','id':id,'date':dateNow(),'name':name.text,'owner':owner.text,'address':address.text,'wa':wa.text,'price_3':d(p3.text),'price_55':d(p55.text),'price_12':d(p12.text),'active':true}]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal: $e');}
+    },child:const Text('Simpan'))]));
+  }
+
+  Future<void> _borrowDialog() async {
+    String borrowerType='Warung', variant=lpgVariants.first, borrower=customers.isEmpty?'':_customerName(customers.first);
+    final name=TextEditingController(), qty=TextEditingController(text:'1'), lender=TextEditingController(), receiver=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
+      title:const Text('Peminjaman Tabung Kosong'),
+      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        DropdownButtonFormField(value:borrowerType,items:['Warung','Perorangan'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis peminjam'),onChanged:(v)=>setD(()=>borrowerType=v!)),
+        if(borrowerType=='Warung' && customers.isNotEmpty) DropdownButtonFormField<String>(value:borrower.isEmpty?_customerName(customers.first):borrower,items:customers.map((c)=>DropdownMenuItem(value:_customerName(c),child:Text(_customerName(c)))).toList(),decoration:const InputDecoration(labelText:'Nama warung'),onChanged:(v)=>setD(()=>borrower=v!)),
+        if(borrowerType=='Perorangan') TextField(controller:name,decoration:const InputDecoration(labelText:'Nama perorangan')),
+        DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis tabung'),onChanged:(v)=>setD(()=>variant=v!)),
+        TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dipinjam')),
+        TextField(controller:lender,decoration:const InputDecoration(labelText:'Diserahkan oleh')),
+        TextField(controller:receiver,decoration:const InputDecoration(labelText:'Diterima oleh')),
+        const Text('Peminjaman gratis, tanpa jaminan.',style:TextStyle(color:Colors.green)),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+        final q=n(qty.text), st=_stock(variant);
+        final who=borrowerType=='Warung'?borrower:name.text.trim();
+        if(q<=0 || who.isEmpty){_msg('Peminjam dan jumlah wajib diisi.');return;}
+        if(st['empty']!<q){_msg('Tabung kosong di gudang tidak cukup.');return;}
+        final id='PINJAM-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
+        try{await _commit([
+          {'sheet':'LPG_Peminjaman','id':id,'date':now,'borrowerType':borrowerType,'borrower':who,'variant':variant,'qty':q,'returned':0,'status':'Belum dikembalikan','givenBy':lender.text,'receivedBy':receiver.text,'free':true},
+          {'sheet':'LPG_MutasiStok','id':id,'date':now,'variant':variant,'type':'BORROW_EMPTY','qty':q,'note':'Dipinjam $who'},
+          {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Peminjaman','description':'$q $variant dipinjam $who','by':lender.text},
+        ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Peminjaman tercatat.');}catch(e){_msg('Gagal: $e');}
+      },child:const Text('Catat Peminjaman'))]
+    )));
+  }
+
+  Future<void> _returnBorrowDialog(Map<String,dynamic> loan) async {
+    final qty=TextEditingController(text:'${n(loan['qty'])-n(loan['returned'])}');
+    final receiver=TextEditingController(), returnedBy=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('Pengembalian Tabung'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+      Text('${loan['borrower']} • ${loan['variant']}'),
+      TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dikembalikan')),
+      TextField(controller:returnedBy,decoration:const InputDecoration(labelText:'Diserahkan kembali oleh')),
+      TextField(controller:receiver,decoration:const InputDecoration(labelText:'Diterima oleh')),
+    ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      final q=n(qty.text), remain=n(loan['qty'])-n(loan['returned']);
+      if(q<=0||q>remain){_msg('Jumlah pengembalian tidak valid.');return;}
+      final id='KEMBALI-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
+      try{await _commit([
+        {'sheet':'LPG_PengembalianPinjam','id':id,'date':now,'loanId':loan['id'],'borrower':loan['borrower'],'variant':loan['variant'],'qty':q,'returnedBy':returnedBy.text,'receivedBy':receiver.text},
+        {'sheet':'LPG_MutasiStok','id':id,'date':now,'variant':loan['variant'],'type':'RETURN_BORROW_EMPTY','qty':q,'note':'Pengembalian dari ${loan['borrower']}'},
+        {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Pengembalian pinjaman','description':'$q ${loan['variant']} dari ${loan['borrower']}','by':receiver.text},
+      ]);
+      final newReturned=n(loan['returned'])+q;
+      await _commit([{'sheet':'LPG_Peminjaman','id':loan['id'],'date':loan['date'],'borrowerType':loan['borrowerType'],'borrower':loan['borrower'],'variant':loan['variant'],'qty':loan['qty'],'returned':newReturned,'status':newReturned>=n(loan['qty'])?'Sudah dikembalikan':'Dikembalikan sebagian','givenBy':loan['givenBy'],'receivedBy':loan['receivedBy'],'free':true}]);
+      if(ctx.mounted)Navigator.pop(ctx);_msg('Pengembalian tercatat.');
+      }catch(e){_msg('Gagal: $e');}
+    },child:const Text('Simpan Pengembalian'))]));
+  }
+
+  Future<void> _leakDialog() async {
+    String variant=lpgVariants.first, customer=customers.isEmpty?'Umum / Walk-in':_customerName(customers.first);
+    final qty=TextEditingController(text:'1'), reason=TextEditingController(), staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Retur Gas Bocor dari Pelanggan'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis LPG'),onChanged:(v)=>setD(()=>variant=v!)),
+      DropdownButtonFormField<String>(value:customer,items:['Umum / Walk-in',...customers.map(_customerName)].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Pelanggan'),onChanged:(v)=>setD(()=>customer=v!)),
+      TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah tabung bocor')),
+      TextField(controller:reason,decoration:const InputDecoration(labelText:'Keterangan kebocoran')),
+      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas pengganti')),
+      const Text('Pelanggan langsung diberi tabung pengganti tanpa biaya.',style:TextStyle(color:Colors.green)),
+    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      final q=n(qty.text), st=_stock(variant);
+      if(q<=0||st['full']!<q){_msg('Jumlah tidak valid atau stok tabung pengganti tidak cukup.');return;}
+      final id='RETUR-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
+      try{await _commit([
+        {'sheet':'LPG_Retur','id':id,'date':now,'direction':'Dari Pelanggan','customer':customer,'variant':variant,'qty':q,'reason':reason.text,'replacementImmediate':true,'staff':staff.text,'status':'Menunggu dikembalikan ke agen'},
+        {'sheet':'LPG_MutasiStok','id':id,'date':now,'variant':variant,'type':'CUSTOMER_LEAK_RETURN','qty':q,'note':'Tabung bocor dari $customer; tabung pengganti langsung diberikan'},
+        {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Retur bocor pelanggan','description':'$q $variant dari $customer','by':staff.text},
+      ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Retur dicatat. Tabung pengganti langsung diberikan.');}catch(e){_msg('Gagal: $e');}
+    },child:const Text('Simpan Retur'))]));
+  }
+
+  Future<void> _agentReturnDialog() async {
+    String variant=lpgVariants.first, agent=lpgAgents.first;
+    final qty=TextEditingController(text:'1'), replacement=TextEditingController(text:'0'), staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Retur Tabung Bocor ke Agen'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+      DropdownButtonFormField(value:agent,items:lpgAgents.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Agen'),onChanged:(v)=>setD(()=>agent=v!)),
+      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis tabung'),onChanged:(v)=>setD(()=>variant=v!)),
+      TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dikirim')),
+      TextField(controller:replacement,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung pengganti isi diterima sekarang')),
+      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas')),
+    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      final q=n(qty.text), rep=n(replacement.text), st=_stock(variant);
+      if(q<=0||st['quarantine']!<q||rep<0||rep>q){_msg('Jumlah retur atau tabung pengganti tidak valid.');return;}
+      final id='RETUR-AGEN-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
+      try{await _commit([
+        {'sheet':'LPG_Retur','id':id,'date':now,'direction':'Ke Agen','agent':agent,'variant':variant,'qty':q,'replacementQty':rep,'staff':staff.text,'status':rep>=q?'Selesai':'Menunggu penggantian'},
+        {'sheet':'LPG_MutasiStok','id':'$id-Q','date':now,'variant':variant,'type':'AGENT_LEAK_RETURN','qty':q,'note':'Retur bocor ke $agent'},
+        if(rep>0) {'sheet':'LPG_MutasiStok','id':'$id-R','date':now,'variant':variant,'type':'AGENT_REPLACEMENT_FULL','qty':rep,'note':'Pengganti dari $agent'},
+          if(rep>0) {'sheet':'LPG_MutasiStok','id':'$id-RCV','date':now,'variant':variant,'type':'AGENT_REPLACEMENT_RECEIVED','qty':rep,'note':'Penerimaan pengganti dari $agent'},
+      ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Retur agen tersimpan.');}catch(e){_msg('Gagal: $e');}
+    },child:const Text('Simpan Retur Agen'))]));
+  }
+
+  Widget _card(String title, String value, IconData icon) => Card(child:Padding(padding:const EdgeInsets.all(12),child:Row(children:[Icon(icon,color:green,size:28),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontSize:12,color:Colors.black54)),Text(value,style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))]))])));
+  Widget _stockPage() => ListView(padding:const EdgeInsets.all(12),children:[
+    const Text('Stok Gas Siap Jual dan Tabung',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+    for(final v in lpgVariants) Builder(builder:(_){final s=_stock(v);return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(v,style:const TextStyle(fontWeight:FontWeight.bold)),Wrap(spacing:12,runSpacing:8,children:[Text('Isi: ${s['full']}'),Text('Kosong: ${s['empty']}'),Text('Karantina: ${s['quarantine']}'),Text('Dipinjam: ${s['borrowed']}'),Text('Dalam retur agen: ${s['inTransit']}')])])));}),
+    const SizedBox(height:12),FilledButton.icon(onPressed:_openingDialog,icon:const Icon(Icons.add_box),label:const Text('Input Stok Awal')),
+    FilledButton.icon(onPressed:_stockOpnameDialog,icon:const Icon(Icons.fact_check),label:const Text('Stock Opname / Koreksi Fisik')),
+  ]);
+
+  Future<void> _openingDialog() async {
+    String variant=lpgVariants.first; final full=TextEditingController(text:'0'), empty=TextEditingController(text:'0'), staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Stok Awal LPG'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>variant=v!),decoration:const InputDecoration(labelText:'Jenis')),
+      TextField(controller:full,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung isi di gudang')),
+      TextField(controller:empty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung kosong di gudang')),
+      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas')),
+    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      final id='OPEN-${DateTime.now().millisecondsSinceEpoch}',now=dateNow();
+      try{await _commit([
+        {'sheet':'LPG_MutasiStok','id':'$id-F','date':now,'variant':variant,'type':'OPEN_FULL','qty':n(full.text),'note':'Stok awal oleh ${staff.text}'},
+        {'sheet':'LPG_MutasiStok','id':'$id-E','date':now,'variant':variant,'type':'OPEN_EMPTY','qty':n(empty.text),'note':'Stok awal oleh ${staff.text}'},
+      ]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal: $e');}
+    },child:const Text('Simpan Stok Awal'))]));
+  }
+
+
+  Future<void> _stockOpnameDialog() async {
+    String variant=lpgVariants.first;
+    final full=TextEditingController(), empty=TextEditingController(), staff=TextEditingController(), reason=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
+      title:const Text('Stock Opname Tabung'),
+      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>variant=v!),decoration:const InputDecoration(labelText:'Jenis tabung')),
+        Text('Catatan sistem: isi ${_stock(variant)['full']} • kosong ${_stock(variant)['empty']}'),
+        TextField(controller:full,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah fisik tabung isi')),
+        TextField(controller:empty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah fisik tabung kosong')),
+        TextField(controller:reason,decoration:const InputDecoration(labelText:'Alasan selisih / pemeriksaan')),
+        TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas pemeriksa')),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+        final st=_stock(variant), deltaFull=n(full.text)-st['full']!, deltaEmpty=n(empty.text)-st['empty']!;
+        final id='OPNAME-${DateTime.now().millisecondsSinceEpoch}',now=dateNow();
+        try{await _commit([
+          {'sheet':'LPG_MutasiStok','id':'$id-F','date':now,'variant':variant,'type':'MANUAL_FULL','delta':deltaFull,'qty':deltaFull.abs(),'note':'Stock opname: ${reason.text}; oleh ${staff.text}'},
+          {'sheet':'LPG_MutasiStok','id':'$id-E','date':now,'variant':variant,'type':'MANUAL_EMPTY','delta':deltaEmpty,'qty':deltaEmpty.abs(),'note':'Stock opname: ${reason.text}; oleh ${staff.text}'},
+          {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Stock opname','description':'$variant; selisih isi $deltaFull; selisih kosong $deltaEmpty; ${reason.text}','by':staff.text}
+        ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Stock opname tersimpan.');}catch(e){_msg('Gagal: $e');}
+      },child:const Text('Simpan Hasil Opname'))]
+    )));
+  }
+
+  Widget _customersPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    FilledButton.icon(onPressed:_customerDialog,icon:const Icon(Icons.person_add),label:const Text('Tambah Pelanggan')),
+    for(final c in customers) Card(child:ListTile(title:Text(_customerName(c)),subtitle:Text('${c['owner']??''} • ${c['address']??''}\nWA: ${c['wa']??'-'}'),isThreeLine:true,trailing:Text('3kg ${money.format(d(c['price_3']))}'))),
+  ]);
+
+  Widget _borrowPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    FilledButton.icon(onPressed:_borrowDialog,icon:const Icon(Icons.add),label:const Text('Catat Peminjaman Tabung')),
+    for(final loan in rows('LPG_Peminjaman')) Card(child:ListTile(title:Text('${loan['borrower']} • ${loan['variant']}'),subtitle:Text('Pinjam: ${loan['qty']} • Kembali: ${loan['returned']??0} • ${loan['status']}\nTanggal: ${loan['date']}\nDiserahkan: ${loan['givenBy']} • Diterima: ${loan['receivedBy']}'),isThreeLine:true,trailing:IconButton(icon:const Icon(Icons.assignment_return,color:Colors.green),onPressed:loan['status']=='Sudah dikembalikan'?null:()=>_returnBorrowDialog(loan)))),
+  ]);
+
+  Widget _returnPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    FilledButton.icon(onPressed:_leakDialog,icon:const Icon(Icons.report_problem),label:const Text('Retur Bocor dari Pelanggan')),
+    FilledButton.icon(onPressed:_agentReturnDialog,icon:const Icon(Icons.local_shipping),label:const Text('Kirim Tabung Bocor ke Agen')),
+    for(final r in rows('LPG_Retur')) Card(child:ListTile(title:Text('${r['direction']} • ${r['variant']}'),subtitle:Text('${r['customer']??r['agent']??''} • ${r['qty']} tabung • ${r['status']}'))),
+  ]);
+
+
+  Future<void> _shareReceipt(Map<String,dynamic> r) async {
+    final textReceipt = 'STRUK PANGKALAN LPG\n'
+      'No: ${r['id']}\nTanggal: ${r['date']}\nPelanggan: ${r['customer']}\n'
+      'Barang: ${r['variant']} x ${r['qty']}\n'
+      'Harga: ${money.format(d(r['unitPrice']))}\nTotal: ${money.format(d(r['total']))}\n'
+      'Pembayaran: ${r['payment']}\nDibayar: ${money.format(d(r['paid']))}\n'
+      'Sisa kasbon: ${money.format(d(r['remaining']))}\n'
+      'Tabung kosong diterima: ${r['emptyReceived']}\nTerima kasih.';
+    final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(textReceipt)}');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      _msg('WhatsApp tidak dapat dibuka pada perangkat ini.');
+    }
+  }
+
+  Future<void> _printLpgReceipt(Map<String,dynamic> r) async {
+    try {
+      final devices = await PrintBluetoothThermal.pairedBluetooths;
+      if (devices.isEmpty) { _msg('Printer Bluetooth belum dipasangkan.'); return; }
+      final connected = await PrintBluetoothThermal.connect(macPrinterAddress: devices.first.macAdress);
+      if (!connected) { _msg('Tidak dapat terhubung ke printer.'); return; }
+      final textReceipt = '       PANGKALAN LPG\n'
+        '--------------------------------\nNo: ${r['id']}\nTanggal: ${r['date']}\n'
+        'Pelanggan: ${r['customer']}\n${r['variant']} x ${r['qty']}\n'
+        'Harga: ${money.format(d(r['unitPrice']))}\nTotal: ${money.format(d(r['total']))}\n'
+        'Bayar: ${money.format(d(r['paid']))}\nSisa: ${money.format(d(r['remaining']))}\n'
+        'Tabung kosong diterima: ${r['emptyReceived']}\n'
+        '--------------------------------\nTerima kasih\n\n\n';
+      await PrintBluetoothThermal.writeString(printText: PrintTextSize(size: 1, text: textReceipt));
+      await PrintBluetoothThermal.disconnect;
+      _msg('Struk LPG dikirim ke printer.');
+    } catch (e) { _msg('Gagal mencetak struk: $e'); }
+  }
+
+  Future<void> _settleDebt(Map<String,dynamic> debt) async {
+    String method='Tunai';
+    final amount=TextEditingController(text:'${d(debt['remaining']).toStringAsFixed(0)}');
+    final staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
+      title:const Text('Pembayaran Kasbon LPG'),
+      content:Column(mainAxisSize:MainAxisSize.min,children:[
+        Text('Sisa: ${money.format(d(debt['remaining']))}'),
+        DropdownButtonFormField(value:method,items:['Tunai','QRIS'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>method=v!),decoration:const InputDecoration(labelText:'Metode pembayaran')),
+        if(method=='QRIS') Image.asset('assets/images/qris.png',height:120,errorBuilder:(_,__,___)=>const Text('QRIS')),
+        TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dibayar')),
+        TextField(controller:staff,decoration:const InputDecoration(labelText:'Diterima oleh')),
+      ]),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+        final paid=d(amount.text), remain=d(debt['remaining']);
+        if(paid<=0||paid>remain){_msg('Jumlah pembayaran tidak valid.');return;}
+        final id='BAYAR-${DateTime.now().millisecondsSinceEpoch}', newRemain=remain-paid;
+        try{
+          await _commit([
+            {'sheet':'LPG_Pembayaran','id':id,'date':dateNow(),'debtId':debt['id'],'customer':debt['customer'],'amount':paid,'method':method,'staff':staff.text},
+            {'sheet':'LPG_Kasbon','id':debt['id'],'date':debt['date'],'customer':debt['customer'],'saleId':debt['saleId'],'total':debt['total'],'paid':d(debt['paid'])+paid,'remaining':newRemain,'status':newRemain<=0?'Lunas':'Belum Lunas'},
+            {'sheet':'LPG_Riwayat','id':id,'date':dateNow(),'activity':'Pembayaran kasbon','description':'${debt['customer']} membayar ${money.format(paid)} via $method','by':staff.text}
+          ]);
+          if(ctx.mounted)Navigator.pop(ctx);_msg('Pembayaran kasbon tersimpan.');
+        }catch(e){_msg('Gagal: $e');}
+      },child:const Text('Simpan Pembayaran'))]
+    )));
+  }
+
+  Widget _salesPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.point_of_sale),label:const Text('Transaksi Penjualan LPG')),
+    for(final r in rows('LPG_Penjualan')) Card(child:ListTile(
+      title:Text('${r['customer']} • ${r['variant']}'),
+      subtitle:Text('${r['qty']} x ${money.format(d(r['unitPrice']))} • ${r['payment']} • ${r['date']}'),
+      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);},itemBuilder:(_)=>const [
+        PopupMenuItem(value:'print',child:Text('Cetak struk Bluetooth')),
+        PopupMenuItem(value:'wa',child:Text('Bagikan WhatsApp')),
+      ],child:Text(money.format(d(r['total'])))),
+    )),
+  ]);
+
+  Widget _purchasePage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    FilledButton.icon(onPressed:_purchaseDialog,icon:const Icon(Icons.add_shopping_cart),label:const Text('Catat Pembelian dari Agen')),
+    for(final r in rows('LPG_Pembelian')) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${r['date']}'),trailing:Text(money.format(d(r['total']))))),
+  ]);
+
+  Widget _debtsPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    for(final r in rows('LPG_Kasbon')) Card(child:ListTile(
+      title:Text('${r['customer']}'),
+      subtitle:Text('Penjualan: ${r['saleId']} • ${r['status']}\nTotal ${money.format(d(r['total']))} • Dibayar ${money.format(d(r['paid']))}'),
+      isThreeLine:true,
+      trailing: r['status']=='Lunas' ? const Icon(Icons.check_circle,color:Colors.green) : TextButton(onPressed:()=>_settleDebt(r),child:Text('Bayar\n${money.format(d(r['remaining']))}')),
+    )),
+  ]);
+
+  Widget _reportPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    for(final v in lpgVariants) Builder(builder:(_){final s=_stock(v);final total=s['full']!+s['empty']!+s['quarantine']!+s['borrowed']!+s['inTransit']!;return _card('$v • Isi / kosong / dipinjam / karantina / retur agen', '${s['full']} / ${s['empty']} / ${s['borrowed']} / ${s['quarantine']} / ${s['inTransit']} • Total $total tabung',Icons.propane_tank);}),
+    _card('Total penjualan tercatat','${money.format(rows('LPG_Penjualan').fold<double>(0,(a,r)=>a+d(r['total'])))}',Icons.point_of_sale),
+    _card('Total pembelian','${money.format(rows('LPG_Pembelian').fold<double>(0,(a,r)=>a+d(r['total'])))}',Icons.shopping_cart),
+    _card('Peminjaman belum lunas', '${rows('LPG_Peminjaman').where((r)=>r['status']!='Sudah dikembalikan').length}', Icons.assignment_return),
+  ]);
+
+  Widget _historyPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''} • ${r['date']??''}')),
+    for(final r in rows('LPG_Penjualan').reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${r['date']}')),
+  ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final pages=<Widget>[_salesPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_borrowPage(),_debtsPage(),_reportPage(),_historyPage()];
+    return Scaffold(
+      appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
+      body:loading?const Center(child:CircularProgressIndicator()):pages[tab],
+      bottomNavigationBar:Container(color:Colors.white,height:72,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
+        for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:112,padding:const EdgeInsets.symmetric(horizontal:8,vertical:10),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.swap_horiz,Icons.account_balance_wallet,Icons.analytics,Icons.history][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
+      ]))),
     );
   }
 }
