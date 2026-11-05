@@ -228,7 +228,9 @@ class MainHomeScreen extends StatefulWidget {
 class _MainHomeScreenState extends State<MainHomeScreen> {
   int _currentIndex = 0;
   int _selectedModule = 0;
-  bool _sidebarCollapsed = false;
+  bool _showMainMenu = false;
+  final Map<String, List<Map<String, dynamic>>> _moduleRecords = {};
+  final Set<String> _moduleLoading = {};
 
   List<Product> products = [];
   List<CartItem> cart = [];
@@ -259,6 +261,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     super.initState();
     Future.microtask(() {
       fetchAllDataFromGoogleSheets();
+      for (final key in ['LPG','DEPOT','GABAH','BENSIN']) { _loadModuleRecords(key); }
     });
   }
 
@@ -480,6 +483,107 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     }
   }
 
+  String _moduleKeyForIndex(int index) => const {2:'LPG',3:'DEPOT',4:'GABAH',5:'BENSIN'}[index] ?? 'LPG';
+
+  List<String> _moduleTypes(String key) {
+    switch (key) {
+      case 'LPG': return ['Pembelian Agen','Penjualan Tabung','Pembayaran Piutang','Retur Tabung','Penyesuaian Stok'];
+      case 'DEPOT': return ['Pembelian Galon','Penjualan Isi Ulang','Penjualan Galon','Pembelian Tutup','Pembelian Tisu','Retur Galon','Galon Pecah','Penyesuaian Stok'];
+      case 'GABAH': return ['Pembelian Petani','Pembelian Tengkulak','Penjualan Pabrik','DP ke Petani','DP ke Tengkulak','DP dari Pabrik','Pelunasan Pembelian','Pelunasan Penjualan'];
+      default: return ['Pembelian BBM','Penjualan BBM','Penyesuaian Stok'];
+    }
+  }
+
+  Future<void> _loadModuleRecords(String key) async {
+    if (_moduleLoading.contains(key)) return;
+    setState(() => _moduleLoading.add(key));
+    try {
+      final uri = Uri.parse('$googleSheetUrl?action=getModuleData&module=$key');
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        if (decoded is List) _moduleRecords[key] = decoded.cast<Map<String, dynamic>>();
+      }
+    } catch (e) { debugPrint('Gagal memuat modul $key: $e'); }
+    if (mounted) setState(() => _moduleLoading.remove(key));
+  }
+
+  double _moduleBalance(String key) {
+    final rows = _moduleRecords[key] ?? [];
+    double balance = 0;
+    for (final r in rows) {
+      final type = (r['type'] ?? '').toString().toLowerCase();
+      final qty = (r['qty'] as num?)?.toDouble() ?? 0;
+      if (type.contains('pembelian') || type.contains('dp dari pabrik')) balance += qty;
+      if (type.contains('penjualan') || type.contains('retur') || type.contains('dp ke ')) balance -= qty;
+    }
+    return balance;
+  }
+
+  double _moduleSales(String key) => (_moduleRecords[key] ?? []).where((r) => (r['type'] ?? '').toString().toLowerCase().contains('penjualan')).fold<double>(0, (v,r) => v + ((r['total'] as num?)?.toDouble() ?? 0));
+
+  Future<void> _moduleForm(String key, {Map<String,dynamic>? existing}) async {
+    final types = _moduleTypes(key);
+    String type = (existing?['type'] ?? types.first).toString();
+    final party = TextEditingController(text: existing?['party']?.toString() ?? '');
+    final desc = TextEditingController(text: existing?['description']?.toString() ?? '');
+    final qty = TextEditingController(text: existing?['qty']?.toString() ?? '1');
+    final unit = TextEditingController(text: existing?['unit']?.toString() ?? (key=='GABAH'?'Kg':key=='BENSIN'?'Liter':key=='LPG'?'Tabung':'Pcs'));
+    final buy = TextEditingController(text: existing?['buyPrice']?.toString() ?? '0');
+    final sell = TextEditingController(text: existing?['sellPrice']?.toString() ?? '0');
+    final payment = TextEditingController(text: existing?['payment']?.toString() ?? 'Tunai');
+    final status = TextEditingController(text: existing?['status']?.toString() ?? 'Lunas');
+    final extra = TextEditingController(text: existing?['extra']?.toString() ?? '');
+    final formKey = GlobalKey<FormState>();
+    await showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx,setDialog) => AlertDialog(
+      title: Text(existing==null?'Catat $key':'Ubah catatan $key'),
+      content: SizedBox(width: 480, child: SingleChildScrollView(child: Form(key:formKey, child: Column(mainAxisSize:MainAxisSize.min, children:[
+        DropdownButtonFormField<String>(value:type, isExpanded:true, decoration:const InputDecoration(labelText:'Jenis transaksi'), items:types.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v){if(v!=null)setDialog(()=>type=v);}),
+        TextFormField(controller:party, decoration:InputDecoration(labelText:key=='LPG'?'Agen / pembeli / warung':key=='GABAH'?'Nama petani / tengkulak / pabrik':'Pemasok / pembeli'), validator:(v)=>v==null||v.trim().isEmpty?'Wajib diisi':null),
+        TextFormField(controller:desc, decoration:InputDecoration(labelText:key=='LPG'?'Varian LPG (3 kg / 5,5 kg / 12 kg)':key=='GABAH'?'Nomor pengiriman / rincian timbangan':'Nama barang / keterangan')),
+        Row(children:[Expanded(child:TextFormField(controller:qty,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Jumlah / berat'),validator:(v)=>double.tryParse((v??'').replaceAll(',','.'))==null?'Angka tidak valid':null)),const SizedBox(width:8),Expanded(child:TextFormField(controller:unit,decoration:const InputDecoration(labelText:'Satuan')))]),
+        Row(children:[Expanded(child:TextFormField(controller:buy,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga beli / satuan'))),const SizedBox(width:8),Expanded(child:TextFormField(controller:sell,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga jual / satuan')))]),
+        Row(children:[Expanded(child:TextFormField(controller:payment,decoration:const InputDecoration(labelText:'Metode bayar (Tunai/QRIS/Transfer/Utang)'))),const SizedBox(width:8),Expanded(child:TextFormField(controller:status,decoration:const InputDecoration(labelText:'Status (Lunas/Utang/DP)')))]),
+        TextFormField(controller:extra,maxLines:3,decoration:InputDecoration(labelText:key=='GABAH'?'Rincian karung/timbangan/DP/saldo':key=='LPG'?'NIK opsional, alamat, harga khusus':'Catatan tambahan')),
+      ])))),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:() async {
+        if(!formKey.currentState!.validate())return;
+        final q=double.parse(qty.text.replaceAll(',','.'));
+        final bp=double.tryParse(buy.text.replaceAll('.',''))??0;
+        final sp=double.tryParse(sell.text.replaceAll('.',''))??0;
+        final isSale=type.toLowerCase().contains('penjualan');
+        final record={'action':'saveModuleRecord','module':key,'id':existing?['id']??DateTime.now().microsecondsSinceEpoch.toString(),'date':existing?['date']??DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),'type':type,'party':party.text.trim(),'description':desc.text.trim(),'qty':q,'unit':unit.text.trim(),'buyPrice':bp,'sellPrice':sp,'total':q*(isSale?sp:bp),'payment':payment.text.trim(),'status':status.text.trim(),'extra':extra.text.trim()};
+        try { final res=await http.post(Uri.parse(googleSheetUrl),headers:{'Content-Type':'application/json'},body:json.encode(record)); if(res.statusCode!=200)throw Exception('HTTP ${res.statusCode}'); Navigator.pop(ctx); await _loadModuleRecords(key); if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Catatan tersimpan'))); } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal menyimpan: $e')));}
+      },child:const Text('Simpan'))]
+    )));
+  }
+
+  Future<void> _deleteModuleRecord(String key, String id) async {
+    try { final r=await http.post(Uri.parse(googleSheetUrl),headers:{'Content-Type':'application/json'},body:json.encode({'action':'deleteModuleRecord','module':key,'id':id})); if(r.statusCode!=200)throw Exception('HTTP ${r.statusCode}'); await _loadModuleRecords(key); } catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal menghapus: $e')));}
+  }
+
+  Widget _modulePage(String key, String title, String subtitle, IconData icon, Color color) {
+    if (!_moduleRecords.containsKey(key) && !_moduleLoading.contains(key)) Future.microtask(()=>_loadModuleRecords(key));
+    final rows=_moduleRecords[key]??[];
+    final stock=_moduleBalance(key);
+    return RefreshIndicator(onRefresh:()=>_loadModuleRecords(key),child:ListView(padding:const EdgeInsets.all(14),children:[
+      Row(children:[CircleAvatar(radius:25,backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color,size:28)),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:19)),Text(subtitle,style:TextStyle(color:Colors.grey[600],fontSize:12))])),IconButton(onPressed:()=>_loadModuleRecords(key),icon:const Icon(Icons.refresh))]),
+      const SizedBox(height:12),
+      Wrap(spacing:8,runSpacing:8,children:[_statCard('Jumlah catatan','${rows.length}',Icons.receipt_long,color),_statCard(key=='GABAH'?'Saldo berat':'Stok terhitung','${stock.toStringAsFixed(1)} ${key=='GABAH'?'Kg':key=='BENSIN'?'Liter':key=='LPG'?'Tabung':'Unit'}',Icons.inventory,color),_statCard('Nilai penjualan',currencyFormatter.format(_moduleSales(key)),Icons.payments,color)]),
+      const SizedBox(height:12),
+      if(key=='LPG') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Agen: PT. Mutiara Sri Rengganis dan PT. Petro Lindo Jaya Utama. Varian: LPG 3 kg, 5,5 kg, 12 kg. NIK pembeli opsional; masukkan di catatan bila diperlukan.'))),
+      if(key=='DEPOT') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Harga acuan isi ulang: Rp3.500 dan Rp4.000. Catat tutup, tisu, galon kosong, retur, dan galon pecah sebagai transaksi tersendiri.'))),
+      if(key=='GABAH') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Gunakan kolom catatan untuk rincian setiap penimbangan, jumlah karung, nomor pengiriman, DP yang diberikan/diterima, dan saldo rekonsiliasi. Satu transaksi dapat mewakili satu pengiriman.'))),
+      if(key=='BENSIN') Card(child:Padding(padding:const EdgeInsets.all(12),child:const Text('Catat pembelian dalam liter dan harga modal per liter, lalu catat penjualan untuk menghitung stok dan omzet.'))),
+      Align(alignment:Alignment.centerRight,child:FilledButton.icon(onPressed:()=>_moduleForm(key),icon:const Icon(Icons.add),label:const Text('Tambah Transaksi'))),
+      if(_moduleLoading.contains(key)) const Center(child:Padding(padding:EdgeInsets.all(24),child:CircularProgressIndicator())),
+      if(rows.isEmpty&&!_moduleLoading.contains(key)) const Padding(padding:EdgeInsets.all(30),child:Center(child:Text('Belum ada catatan transaksi.'))),
+      ...rows.reversed.map((r){final id=(r['id']??'').toString();final total=(r['total'] as num?)?.toDouble()??0;return Card(child:ListTile(title:Text('${r['type']??'-'} · ${r['party']??'-'}',style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text('${r['date']??''}\n${r['description']??''} · ${r['qty']??0} ${r['unit']??''}\n${r['payment']??''} / ${r['status']??''}\n${r['extra']??''}'),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='edit')_moduleForm(key,existing:r);if(v=='delete')_deleteModuleRecord(key,id);},itemBuilder:(_)=>const [PopupMenuItem(value:'edit',child:Text('Ubah')),PopupMenuItem(value:'delete',child:Text('Hapus'))]),leading:CircleAvatar(backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color)),));}),
+    ]));
+  }
+
+  Widget _statCard(String label,String value,IconData icon,Color color)=>SizedBox(width:155,child:Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(icon,color:color),const SizedBox(height:6),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:16)),Text(label,style:const TextStyle(fontSize:11,color:Colors.grey))]))));
+
   Widget _dashboardPage() {
     final now = DateTime.now();
     final today = transactions.where((t) =>
@@ -503,7 +607,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
         subtitle: Text(sub), trailing: const Icon(Icons.chevron_right),
         onTap: () => setState(() => _selectedModule = index)));
 
-    return RefreshIndicator(onRefresh: () async => fetchAllDataFromGoogleSheets(),
+    return RefreshIndicator(onRefresh: () async { fetchAllDataFromGoogleSheets(); for (final key in ['LPG','DEPOT','GABAH','BENSIN']) { await _loadModuleRecords(key); } },
       child: ListView(padding: const EdgeInsets.all(16), children: [
         const Text('Dashboard / Beranda', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
         Text(DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(now)),
@@ -515,6 +619,10 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
             stat('Estimasi laba Warung', currencyFormatter.format(laba), Icons.trending_up, Colors.blue),
             stat('Piutang Warung', currencyFormatter.format(piutang), Icons.account_balance_wallet, Colors.orange),
             stat('Transaksi hari ini', '${today.length}', Icons.receipt_long, Colors.purple),
+            stat('Stok LPG terhitung', '${_moduleBalance('LPG').toStringAsFixed(0)} tabung', Icons.propane_tank, Colors.blue),
+            stat('Penjualan Depot', currencyFormatter.format(_moduleSales('DEPOT')), Icons.water_drop, Colors.cyan),
+            stat('Penjualan Gabah', currencyFormatter.format(_moduleSales('GABAH')), Icons.grass, Colors.brown),
+            stat('Penjualan Bensin', currencyFormatter.format(_moduleSales('BENSIN')), Icons.local_gas_station, Colors.deepOrange),
           ]),
         const SizedBox(height: 16),
         const Text('Akses Cepat', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
@@ -538,7 +646,11 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
 
   Widget _warungWorkspace() {
     return DefaultTabController(length: 6, child: Column(children: [
-      Material(color: Colors.green.shade50, child: const TabBar(isScrollable: true,
+      Expanded(child: TabBarView(children: [
+        buildKasirPage(), buildProductManagementPage(), buildRestockPage(),
+        buildConsignmentReportPage(), buildDebtPage(), buildHistoryPage(),
+      ])),
+      Material(color: Colors.green.shade50, elevation: 8, child: SafeArea(top:false,child:const TabBar(isScrollable:true,
         labelColor: Colors.green, tabs: [
           Tab(icon: Icon(Icons.point_of_sale), text: 'Kasir'),
           Tab(icon: Icon(Icons.inventory_2), text: 'Produk'),
@@ -546,78 +658,18 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           Tab(icon: Icon(Icons.local_shipping), text: 'Sales'),
           Tab(icon: Icon(Icons.book_online), text: 'Kasbon'),
           Tab(icon: Icon(Icons.history), text: 'Laporan'),
-        ])),
-      Expanded(child: TabBarView(children: [
-        buildKasirPage(), buildProductManagementPage(), buildRestockPage(),
-        buildConsignmentReportPage(), buildDebtPage(), buildHistoryPage(),
-      ])),
+        ]))),
     ]));
-  }
-
-  Widget _modulePage(String title, String subtitle, IconData icon, Color color, List<String> features) {
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Row(children: [
-        CircleAvatar(radius: 27, backgroundColor: color.withOpacity(.12), child: Icon(icon, color: color, size: 30)),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          Text(subtitle, style: TextStyle(color: Colors.grey[600])),
-        ])),
-      ]),
-      const SizedBox(height: 16),
-      Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [const Text('Fitur modul', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
-          ...features.map((f) => Padding(padding: const EdgeInsets.symmetric(vertical: 5),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.check_circle_outline, color: color, size: 18),
-              const SizedBox(width: 8), Expanded(child: Text(f)),
-            ]))),
-        ],
-      ))),
-      Card(color: color.withOpacity(.06), child: const Padding(padding: EdgeInsets.all(14),
-        child: Text('Fondasi menu dan database modul disiapkan pada versi ini. Form transaksi, penghitungan stok, pembayaran, DP, dan laporan operasional perlu dilanjutkan serta diuji sebelum digunakan untuk pencatatan keuangan.'))),
-    ]);
   }
 
   Widget _selectedModulePage() {
     switch (_selectedModule) {
       case 0: return _dashboardPage();
       case 1: return _warungWorkspace();
-      case 2: return _modulePage('Pangkalan GAS LPG', 'Pembelian agen, penjualan per tabung, stok dan piutang',
-        Icons.propane_tank, Colors.blue, [
-          'Agen PT. Mutiara Sri Rengganis dan PT. Petro Lindo Jaya Utama',
-          'Produk LPG 3 Kg, 5,5 Kg, dan 12 Kg',
-          'Harga modal, stok per jenis, dan penjualan per tabung',
-          'Nama pembeli dan NIK opsional pada penjualan',
-          'Pelanggan warung, harga khusus, tunai, QRIS, dan utang',
-          'Nota WhatsApp dan laporan penjualan serta keuntungan',
-        ]);
-      case 3: return _modulePage('Depot Isi Ulang Air Mineral', 'Penjualan galon dan pengendalian perlengkapan',
-        Icons.water_drop, Colors.cyan, [
-          'Harga jual galon Rp3.500 dan Rp4.000',
-          'Jumlah galon terjual dan laporan harian',
-          'Stok tutup galon dan tisu galon',
-          'Galon kosong, retur, dan galon pecah',
-          'Belanja perlengkapan, stok, dan keuntungan',
-        ]);
-      case 4: return _modulePage('Jual Beli Gabah', 'Pembelian, penimbangan, penjualan pabrik, dan saldo DP',
-        Icons.grass, Colors.brown, [
-          'Pembelian melalui tengkulak dan langsung dari petani',
-          'Berat KG, jumlah karung, harga beli, dan total pembelian',
-          'Penjualan ke pabrik dengan detail setiap penimbangan',
-          'DP kepada petani/tengkulak dan DP dari pabrik',
-          'Perhitungan sisa DP atau tambahan pembayaran',
-          'Selisih berat, harga, hasil penjualan, dan laporan per pengiriman',
-        ]);
-      case 5: return _modulePage('Bensin Eceran', 'Pembelian liter, penjualan, dan stok bensin',
-        Icons.local_gas_station, Colors.deepOrange, [
-          'Jumlah liter dan harga pembelian',
-          'Harga jual per liter',
-          'Stok bensin otomatis berkurang saat penjualan',
-          'Laporan penjualan dan keuntungan harian',
-        ]);
+      case 2: return _modulePage('LPG','Pangkalan GAS LPG','Pembelian agen, penjualan tabung, stok dan piutang',Icons.propane_tank,Colors.blue);
+      case 3: return _modulePage('DEPOT','Depot Isi Ulang Air Mineral','Penjualan galon, perlengkapan, retur dan galon pecah',Icons.water_drop,Colors.cyan);
+      case 4: return _modulePage('GABAH','Jual Beli Gabah','Pembelian petani/tengkulak, penimbangan pabrik dan DP',Icons.grass,Colors.brown);
+      case 5: return _modulePage('BENSIN','Bensin Eceran','Pembelian liter, penjualan, stok dan laba',Icons.local_gas_station,Colors.deepOrange);
       default: return _dashboardPage();
     }
   }
@@ -635,9 +687,9 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          tooltip: _sidebarCollapsed ? 'Perluas menu' : 'Minimalkan menu',
-          icon: Icon(_sidebarCollapsed ? Icons.menu : Icons.menu_open),
-          onPressed: () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
+          tooltip: _showMainMenu ? 'Tutup menu utama' : 'Buka menu utama',
+          icon: Icon(_showMainMenu ? Icons.close : Icons.menu),
+          onPressed: () => setState(() => _showMainMenu = !_showMainMenu),
         ),
         title: Row(children: [
           ClipRRect(borderRadius: BorderRadius.circular(20), child: Image.asset(
@@ -658,43 +710,12 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
           })],
       ),
       body: Row(children: [
-        AnimatedContainer(duration: const Duration(milliseconds: 180),
-          width: _sidebarCollapsed ? 64 : 220, color: const Color(0xFF18334D),
-          child: Column(children: [
-            if (!_sidebarCollapsed) const Padding(
-              padding: EdgeInsets.all(14),
-              child: Align(alignment: Alignment.centerLeft,
-                child: Text('MENU UTAMA', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold))),
-            ),
-            Expanded(child: ListView.builder(itemCount: menu.length, itemBuilder: (context, i) {
-              final selected = _selectedModule == i;
-              final item = menu[i];
-              return Tooltip(message: item['title'] as String, child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: selected ? Colors.white.withOpacity(.16) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10)),
-                child: InkWell(borderRadius: BorderRadius.circular(10),
-                  onTap: () => setState(() => _selectedModule = i),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: _sidebarCollapsed ? 0 : 11, vertical: 14),
-                    child: Row(mainAxisAlignment: _sidebarCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-                      children: [
-                        Icon(item['icon'] as IconData, color: selected ? Colors.white : Colors.white70),
-                        if (!_sidebarCollapsed) ...[
-                          const SizedBox(width: 10),
-                          Expanded(child: Text(item['title'] as String, style: TextStyle(
-                            color: selected ? Colors.white : Colors.white70, fontSize: 12,
-                            fontWeight: selected ? FontWeight.bold : FontWeight.normal))),
-                        ],
-                      ]),
-                  )),
-              ));
-            })),
-            if (!_sidebarCollapsed) const Padding(padding: EdgeInsets.all(12),
-              child: Text('WARUNG BAROKAH POS', style: TextStyle(color: Colors.white54, fontSize: 10))),
-          ]),
-        ),
+        if (_showMainMenu) AnimatedContainer(duration: const Duration(milliseconds:180), width:230,
+          color:const Color(0xFF18334D), child:Column(children:[
+            const Padding(padding:EdgeInsets.all(14),child:Align(alignment:Alignment.centerLeft,child:Text('MENU UTAMA',style:TextStyle(color:Colors.white70,fontSize:11,fontWeight:FontWeight.bold)))),
+            Expanded(child:ListView.builder(itemCount:menu.length,itemBuilder:(context,i){final selected=_selectedModule==i;final item=menu[i];return Container(margin:const EdgeInsets.symmetric(horizontal:7,vertical:3),decoration:BoxDecoration(color:selected?Colors.white.withOpacity(.16):Colors.transparent,borderRadius:BorderRadius.circular(10)),child:ListTile(dense:true,leading:Icon(item['icon'] as IconData,color:selected?Colors.white:Colors.white70),title:Text(item['title'] as String,style:TextStyle(color:selected?Colors.white:Colors.white70,fontSize:12,fontWeight:selected?FontWeight.bold:FontWeight.normal)),onTap:()=>setState((){_selectedModule=i;_showMainMenu=false;})));})),
+            const Padding(padding:EdgeInsets.all(12),child:Text('WARUNG BAROKAH POS',style:TextStyle(color:Colors.white54,fontSize:10))),
+          ])),
         const VerticalDivider(width: 1, thickness: 1),
         Expanded(child: _selectedModulePage()),
       ]),
