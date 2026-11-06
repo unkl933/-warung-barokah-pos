@@ -2711,7 +2711,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   final Color green = const Color(0xFF10B981);
   final List<String> tabs = const [
     'Penjualan', 'Tabung di Luar', 'Pembelian', 'Pelanggan', 'Stok',
-    'Retur Gas', 'Kasbon', 'Laporan', 'Riwayat Transaksi'
+    'Retur Gas', 'Kasbon', 'Laporan', 'Riwayat Transaksi', 'Distribusi', 'Laporan Distribusi'
   ];
   int tab = 0;
   bool reportMonthly = false;
@@ -2868,6 +2868,10 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         case 'OPEN_FULL': full += qty; break;
         case 'OPEN_EMPTY': empty += qty; break;
         case 'PURCHASE_FULL': full += qty; break;
+        case 'DIST_LOAD_FULL': full -= qty; break;
+        case 'DIST_RETURN_FULL': full += qty; break;
+        case 'DIST_RETURN_EMPTY': empty += qty; break;
+        case 'DIST_LOAN_FULL': borrowed += qty; break;
         case 'SALE_FULL': full -= qty; break;
         case 'SALE_EMPTY_IN': empty += qty; break;
         case 'PURCHASE_EMPTY_OUT': empty -= qty; break;
@@ -4002,6 +4006,168 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     ]);
   }
 
+  // -------------------------------------------------------------------------
+  // MANAJEMEN DISTRIBUSI LPG
+  // -------------------------------------------------------------------------
+  static const Map<String, List<String>> _distributionRoutes = {
+    'Senin': ['Kudadepa','Ragamukti','Balandongan','Tajurhalang','Karang Mulya','Cijoho','Kiarajangkung'],
+    'Rabu': ['Jl Baru Cisinga','Pasirgede','Kiarajangkung','Cintamanah','Cimulya','Cilamgen'],
+    'Kamis': ['Cijoho','Buniruum','Sukamulya','Pasirjaya','Kiarajangkung'],
+    'Jumat': ['Jl Baru Cisinga','Pasirgede','Kiarajangkung'],
+  };
+
+  String _distributionRef() => 'DST-LPG-${DateFormat('yyyyMMdd-HHmmss').format(DateTime.now())}';
+  List<Map<String,dynamic>> get _distributions => rows('LPG_Distribusi').where((x)=>x['voided']!=true).toList();
+  List<Map<String,dynamic>> get _distributionExpenses => rows('LPG_BiayaDistribusi').where((x)=>x['voided']!=true).toList();
+  double _distributionExpenseTotal(String id) => _distributionExpenses.where((x)=>'${x['distributionId']}'==id).fold<double>(0,(a,x)=>a+d(x['amount']));
+  double _distributionSalesTotal(String id) => _distributionExpenses.where((x)=>false).fold<double>(0,(a,x)=>a); // sales detail is recorded on the distribution record
+
+  Future<void> _distributionDialog({Map<String,dynamic>? existing}) async {
+    String day='${existing?['day'] ?? 'Senin'}';
+    String supplier='${existing?['supplier'] ?? (day=='Rabu'||day=='Jumat'?'PT. Petrolindo Jaya Utama':'PT. Mutiara Sri Rengganis')}';
+    String status='${existing?['status'] ?? 'Terjadwal'}';
+    final date=TextEditingController(text: existing?['date']?.toString() ?? DateFormat('yyyy-MM-dd').format(DateTime.now()));
+    final route=TextEditingController(text: existing?['route']?.toString() ?? (_distributionRoutes[day]??[]).join(', '));
+    final driver=TextEditingController(text: existing?['driver']?.toString() ?? 'Pemilik');
+    final helper=TextEditingController(text: existing?['helper']?.toString() ?? 'Karyawan');
+    final start=TextEditingController(text: existing?['startTime']?.toString() ?? '');
+    final end=TextEditingController(text: existing?['endTime']?.toString() ?? '');
+    final note=TextEditingController(text: existing?['note']?.toString() ?? '');
+    final salesDetail=TextEditingController(text: existing?['salesDetail']?.toString() ?? '');
+    final qty={for(final v in lpgVariants) v:TextEditingController(text:'${(jsonDecode('${existing?['items']??'{}'}') is Map ? (jsonDecode('${existing?['items']??'{}'}') as Map)[v]??0 : 0)}')};
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(
+      title:Text(existing==null?'Buat Distribusi LPG':'Edit Distribusi LPG'),
+      content:SizedBox(width:520,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        DropdownButtonFormField<String>(value:day,decoration:const InputDecoration(labelText:'Jadwal hari'),items:_distributionRoutes.keys.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)setD((){day=v;supplier=(day=='Rabu'||day=='Jumat')?'PT. Petrolindo Jaya Utama':'PT. Mutiara Sri Rengganis';route.text=(_distributionRoutes[day]??[]).join(', ');});}),
+        TextField(controller:date,decoration:const InputDecoration(labelText:'Tanggal (yyyy-MM-dd)')),
+        DropdownButtonFormField<String>(value:supplier,decoration:const InputDecoration(labelText:'Agen'),items:const ['PT. Mutiara Sri Rengganis','PT. Petrolindo Jaya Utama'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)setD(()=>supplier=v);}),
+        const SizedBox(height:8),Align(alignment:Alignment.centerLeft,child:Text('Jumlah tabung yang diambil',style:TextStyle(fontWeight:FontWeight.bold))),
+        for(final v in lpgVariants) TextField(controller:qty[v],keyboardType:TextInputType.number,decoration:InputDecoration(labelText:v, suffixText:'tabung')),
+        TextField(controller:route,maxLines:3,decoration:const InputDecoration(labelText:'Rute / daftar wilayah (bisa diedit)',helperText:'Pisahkan setiap wilayah dengan koma')),
+        TextField(controller:driver,decoration:const InputDecoration(labelText:'Pengemudi')),
+        TextField(controller:helper,decoration:const InputDecoration(labelText:'Karyawan / pembantu')),
+        Row(children:[Expanded(child:TextField(controller:start,decoration:const InputDecoration(labelText:'Jam berangkat (HH:mm)'))),const SizedBox(width:8),Expanded(child:TextField(controller:end,decoration:const InputDecoration(labelText:'Jam kembali (HH:mm)')))]),
+        DropdownButtonFormField<String>(value:status,decoration:const InputDecoration(labelText:'Status'),items:const ['Terjadwal','Pembayaran Agen','Pembelian','Muat Tabung','Dalam Distribusi','Distribusi Selesai','Kembali ke Gudang','Ditutup'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)setD(()=>status=v);}),
+        TextField(controller:salesDetail,maxLines:3,decoration:const InputDecoration(labelText:'Penjualan per pelanggan/wilayah (catatan)')),
+        TextField(controller:note,maxLines:2,decoration:const InputDecoration(labelText:'Catatan')), 
+        const SizedBox(height:6),const Text('Upah otomatis per distribusi: pengemudi/pemilik Rp50.000 dan karyawan Rp65.000.',style:TextStyle(fontSize:12)),
+      ]))),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+        final items={for(final v in lpgVariants) v:(int.tryParse(qty[v]!.text) ?? 0)};
+        final totalQty=items.values.fold<int>(0,(a,b)=>a+b);
+        if(totalQty<=0){_msg('Isi jumlah minimal satu jenis tabung.');return;}
+        final id='${existing?['id'] ?? _distributionRef()}';
+        final record={'sheet':'LPG_Distribusi','id':id,'date':date.text.trim(),'day':day,'supplier':supplier,'items':jsonEncode(items),'totalQty':totalQty,'route':route.text.trim(),'driver':driver.text.trim(),'helper':helper.text.trim(),'driverWage':50000,'helperWage':65000,'startTime':start.text.trim(),'endTime':end.text.trim(),'status':status,'salesDetail':salesDetail.text.trim(),'note':note.text.trim(),'updatedAt':dateNow()};
+        try{await _commit([record,{'sheet':'LPG_Riwayat','id':'$id-${DateTime.now().millisecondsSinceEpoch}','date':dateNow(),'activity':existing==null?'Distribusi dibuat':'Distribusi diperbarui','description':'$id • $day • $totalQty tabung • $status','by':'Aplikasi'}]);if(ctx.mounted)Navigator.pop(ctx);_msg('Data distribusi tersimpan.');}catch(e){_msg('Gagal menyimpan distribusi: $e');}
+      },child:const Text('Simpan'))]
+    )));
+  }
+
+  Future<void> _distributionExpenseDialog(Map<String,dynamic> dist) async {
+    String category='BBM';
+    final amount=TextEditingController(),desc=TextEditingController(),paidBy=TextEditingController(text:'Pemilik');
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Biaya Distribusi'),content:Column(mainAxisSize:MainAxisSize.min,children:[
+      DropdownButtonFormField<String>(value:category,decoration:const InputDecoration(labelText:'Kategori biaya'),items:const ['BBM','Rokok','Kopi / Makanan','Parkir / Lainnya','Biaya Lainnya'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)setD(()=>category=v);}),
+      TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah rupiah')),
+      TextField(controller:desc,decoration:const InputDecoration(labelText:'Keterangan')),
+      TextField(controller:paidBy,decoration:const InputDecoration(labelText:'Dibayar oleh')),
+    ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final value=d(amount.text);if(value<=0){_msg('Masukkan jumlah biaya.');return;}final id='DST-BIAYA-${DateTime.now().millisecondsSinceEpoch}';try{await _commit([{'sheet':'LPG_BiayaDistribusi','id':id,'distributionId':dist['id'],'date':dateNow(),'category':category,'amount':value,'description':desc.text.trim(),'paidBy':paidBy.text.trim()},{'sheet':'LPG_Riwayat','id':'$id-LOG','date':dateNow(),'activity':'Biaya distribusi','description':'${dist['id']} • $category • ${money.format(value)}','by':paidBy.text.trim()}]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal menyimpan biaya: $e');}},child:const Text('Simpan'))]));
+  }
+
+  Future<void> _closeDistributionDialog(Map<String,dynamic> dist) async {
+    final Map<String,dynamic> loadedByType=(() { try { return Map<String,dynamic>.from(jsonDecode('${dist['items']??'{}'}')); } catch (_) { return <String,dynamic>{}; } })();
+    final sold={for(final v in lpgVariants) v:TextEditingController(text:'0')};
+    final empties={for(final v in lpgVariants) v:TextEditingController(text:'0')};
+    final loaned={for(final v in lpgVariants) v:TextEditingController(text:'0')};
+    final remaining={for(final v in lpgVariants) v:TextEditingController(text:'${loadedByType[v]??0}')};
+    final salesAmount=TextEditingController(text:'${dist['salesAmount']??0}');
+    final cashSales=TextEditingController(text:'${dist['cashSales']??0}');
+    final qrisSales=TextEditingController(text:'${dist['qrisSales']??0}');
+    final creditSales=TextEditingController(text:'${dist['creditSales']??0}');
+    final mismatch=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('Rekonsiliasi & Tutup Distribusi'),content:SizedBox(width:520,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+      Text('Referensi: ${dist['id']}'),
+      for(final v in lpgVariants) Card(child:Padding(padding:const EdgeInsets.all(8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text('$v • dimuat: ${loadedByType[v]??0} tabung',style:const TextStyle(fontWeight:FontWeight.bold)),
+        Row(children:[Expanded(child:TextField(controller:sold[v],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Terjual'))),const SizedBox(width:6),Expanded(child:TextField(controller:remaining[v],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Isi kembali')))]),
+        Row(children:[Expanded(child:TextField(controller:empties[v],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Kosong diterima'))),const SizedBox(width:6),Expanded(child:TextField(controller:loaned[v],keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Dipinjam/dititip')))]),
+      ]))),
+      const Divider(),
+      TextField(controller:salesAmount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Total nilai penjualan (Rp)')),
+      Row(children:[Expanded(child:TextField(controller:cashSales,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tunai (Rp)'))),const SizedBox(width:6),Expanded(child:TextField(controller:qrisSales,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'QRIS (Rp)')))]),
+      TextField(controller:creditSales,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Kasbon (Rp)')),
+      TextField(controller:mismatch,maxLines:2,decoration:const InputDecoration(labelText:'Penjelasan selisih (jika ada)')),
+    ]))),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
+      final totalLoaded=loadedByType.values.fold<int>(0,(a,x)=>a+n(x));
+      final totalSold=sold.values.fold<int>(0,(a,x)=>a+n(x.text));
+      final totalLoaned=loaned.values.fold<int>(0,(a,x)=>a+n(x.text));
+      final totalRemaining=remaining.values.fold<int>(0,(a,x)=>a+n(x.text));
+      final diff=totalLoaded-totalSold-totalLoaned-totalRemaining;
+      if(diff!=0&&mismatch.text.trim().isEmpty){_msg('Jelaskan selisih tabung sebelum menutup distribusi.');return;}
+      final closeDate=dateNow(),distId='${dist['id']}';
+      final records=<Map<String,dynamic>>[
+        {'sheet':'LPG_Distribusi',...dist,'loadedQty':totalLoaded,'soldQty':totalSold,'emptyReceived':empties.values.fold<int>(0,(a,x)=>a+n(x.text)),'loanedQty':totalLoaned,'returnedFullQty':totalRemaining,'soldByType':jsonEncode({for(final v in lpgVariants)v:n(sold[v]!.text)}),'emptyByType':jsonEncode({for(final v in lpgVariants)v:n(empties[v]!.text)}),'loanedByType':jsonEncode({for(final v in lpgVariants)v:n(loaned[v]!.text)}),'returnedByType':jsonEncode({for(final v in lpgVariants)v:n(remaining[v]!.text)}),'salesAmount':d(salesAmount.text),'cashSales':d(cashSales.text),'qrisSales':d(qrisSales.text),'creditSales':d(creditSales.text),'reconciliationDiff':diff,'reconciliationNote':mismatch.text.trim(),'status':'Ditutup','closedAt':closeDate},
+        for(final v in lpgVariants) if(n(loadedByType[v])>0) {'sheet':'LPG_MutasiStok','id':'$distId-DIST-$v-LOAD','date':closeDate,'variant':v,'type':'DIST_LOAD_FULL','qty':n(loadedByType[v]),'note':'Tabung dimuat untuk distribusi $distId'},
+        for(final v in lpgVariants) if(n(remaining[v]!.text)>0) {'sheet':'LPG_MutasiStok','id':'$distId-DIST-$v-RETURN','date':closeDate,'variant':v,'type':'DIST_RETURN_FULL','qty':n(remaining[v]!.text),'note':'Tabung isi kembali dari distribusi $distId'},
+        for(final v in lpgVariants) if(n(empties[v]!.text)>0) {'sheet':'LPG_MutasiStok','id':'$distId-DIST-$v-EMPTY','date':closeDate,'variant':v,'type':'DIST_RETURN_EMPTY','qty':n(empties[v]!.text),'note':'Tabung kosong diterima pada distribusi $distId'},
+        for(final v in lpgVariants) if(n(loaned[v]!.text)>0) {'sheet':'LPG_MutasiStok','id':'$distId-DIST-$v-LOAN','date':closeDate,'variant':v,'type':'DIST_LOAN_FULL','qty':n(loaned[v]!.text),'note':'Tabung dipinjamkan/dititipkan pada distribusi $distId'},
+        {'sheet':'LPG_Riwayat','id':'$distId-CLOSE-${DateTime.now().millisecondsSinceEpoch}','date':closeDate,'activity':'Distribusi ditutup','description':'$distId • dimuat $totalLoaded • terjual $totalSold • kembali $totalRemaining • selisih $diff','by':'Aplikasi'},
+      ];
+      try{await _commit(records);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal menutup distribusi: $e');}
+    },child:const Text('Tutup Distribusi'))]));
+  }
+
+  Widget _distributionPage()=>ListView(padding:const EdgeInsets.all(12),children:[
+    Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      const Text('Jadwal Distribusi LPG',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),
+      for(final entry in _distributionRoutes.entries) Padding(padding:const EdgeInsets.only(top:7),child:Text('${entry.key}: ${entry.value.join(' • ')}',style:const TextStyle(fontSize:12))),
+      const SizedBox(height:8),const Text('Jadwal dan rute di atas dapat diubah saat membuat atau mengedit distribusi.',style:TextStyle(fontSize:12,color:Colors.black54)),
+    ]))),
+    FilledButton.icon(onPressed:()=>_distributionDialog(),icon:const Icon(Icons.add_road),label:const Text('Buat Distribusi Baru')),
+    const SizedBox(height:6),
+    for(final r in _distributions.reversed) Builder(builder:(ctx){
+      final id='${r['id']}';final expenses=_distributionExpenseTotal(id);final items=(() { try { return Map<String,dynamic>.from(jsonDecode('${r['items']??'{}'}')); } catch (_) { return <String,dynamic>{}; } })();
+      return Card(child:Padding(padding:const EdgeInsets.all(10),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Row(children:[Expanded(child:Text(id,style:const TextStyle(fontWeight:FontWeight.bold))),Chip(label:Text('${r['status']??'Terjadwal'}'))]),
+        Text('${r['day']??'-'} • ${_formatLpgDate(r['date'])} • ${r['supplier']??'-'}'),
+        Text('Tabung: ${lpgVariants.map((v)=>'$v ${items[v]??0}').join(' | ')}'),
+        Text('Rute: ${r['route']??'-'}',maxLines:2,overflow:TextOverflow.ellipsis),
+        Text('Pengemudi: ${r['driver']??'-'} • Karyawan: ${r['helper']??'-'}'),
+        Text('Upah: ${money.format(d(r['driverWage']))} + ${money.format(d(r['helperWage']))} • Biaya tercatat: ${money.format(expenses)}'),
+        if(r['status']=='Ditutup') Text('Penjualan: ${money.format(d(r['salesAmount']))} • Tunai ${money.format(d(r['cashSales']))} • QRIS ${money.format(d(r['qrisSales']))} • Kasbon ${money.format(d(r['creditSales']))}'),
+        if(r['status']=='Ditutup') Text('Rekonsiliasi: dimuat ${r['loadedQty']??0}, terjual ${r['soldQty']??0}, kosong ${r['emptyReceived']??0}, dipinjam/dititip ${r['loanedQty']??0}, kembali ${r['returnedFullQty']??0}, selisih ${r['reconciliationDiff']??0}'),
+        Wrap(spacing:6,children:[if(r['status']!='Ditutup') OutlinedButton.icon(onPressed:()=>_distributionDialog(existing:r),icon:const Icon(Icons.edit,size:16),label:const Text('Edit')),OutlinedButton.icon(onPressed:()=>_distributionExpenseDialog(r),icon:const Icon(Icons.receipt_long,size:16),label:const Text('Tambah Biaya')),if(r['status']!='Ditutup')FilledButton.tonalIcon(onPressed:()=>_closeDistributionDialog(r),icon:const Icon(Icons.task_alt,size:16),label:const Text('Rekonsiliasi / Tutup'))]),
+      ])));
+    }),
+    const Divider(),
+    const Text('Ringkasan biaya distribusi',style:TextStyle(fontWeight:FontWeight.bold)),
+    for(final r in _distributionExpenses.reversed.take(30)) ListTile(dense:true,title:Text('${r['category']} • ${money.format(d(r['amount']))}'),subtitle:Text('${r['distributionId']} • ${r['description']??''} • ${_formatLpgDate(r['date'])}')),
+  ]);
+
+  Widget _distributionReportPage() {
+    final records=_distributions.where((r){final dt=DateTime.tryParse('${r['date']??''}');if(dt==null)return false;return reportMonthly?(dt.year==reportDate.year&&dt.month==reportDate.month):(dt.year==reportDate.year&&dt.month==reportDate.month&&dt.day==reportDate.day);}).toList();
+    final expenses=_distributionExpenses.where((e){final dt=DateTime.tryParse('${e['date']??''}');if(dt==null)return false;return reportMonthly?(dt.year==reportDate.year&&dt.month==reportDate.month):(dt.year==reportDate.year&&dt.month==reportDate.month&&dt.day==reportDate.day);}).toList();
+    final sales=records.fold<double>(0,(a,r)=>a+d(r['salesAmount']));
+    final cash=records.fold<double>(0,(a,r)=>a+d(r['cashSales']));
+    final qris=records.fold<double>(0,(a,r)=>a+d(r['qrisSales']));
+    final credit=records.fold<double>(0,(a,r)=>a+d(r['creditSales']));
+    final expense=expenses.fold<double>(0,(a,e)=>a+d(e['amount']));
+    final wages=records.fold<double>(0,(a,r)=>a+d(r['driverWage'])+d(r['helperWage']));
+    return ListView(padding:const EdgeInsets.all(12),children:[
+      SegmentedButton<bool>(segments:const [ButtonSegment(value:false,label:Text('Harian')),ButtonSegment(value:true,label:Text('Bulanan'))],selected:{reportMonthly},onSelectionChanged:(v)=>setState(()=>reportMonthly=v.first)),
+      ListTile(title:Text(DateFormat(reportMonthly?'MMMM yyyy':'dd MMMM yyyy','id_ID').format(reportDate)),trailing:IconButton(icon:const Icon(Icons.calendar_month),onPressed:()async{final picked=await showDatePicker(context:context,initialDate:reportDate,firstDate:DateTime(2020),lastDate:DateTime(2100));if(picked!=null)setState(()=>reportDate=picked);})),
+      Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+        _reportLine('Jumlah distribusi','${records.length} trip'),_reportLine('Nilai penjualan',money.format(sales)),_reportLine('Tunai',money.format(cash)),_reportLine('QRIS',money.format(qris)),_reportLine('Kasbon',money.format(credit)),_reportLine('Biaya operasional',money.format(expense)),_reportLine('Upah tetap distribusi',money.format(wages)),_reportLine('Sisa setelah biaya & upah',money.format(sales-expense-wages)),
+      ]))),
+      const Text('Rincian distribusi',style:TextStyle(fontWeight:FontWeight.bold)),
+      for(final r in records) Card(child:ListTile(title:Text('${r['id']} • ${r['day']}'),subtitle:Text('${r['supplier']} • ${r['totalQty']} tabung • ${r['status']}\nPenjualan ${money.format(d(r['salesAmount']))} • Biaya ${money.format(_distributionExpenseTotal('${r['id']}'))}'),isThreeLine:true)),
+      const Text('Rincian biaya',style:TextStyle(fontWeight:FontWeight.bold)),
+      for(final e in expenses) ListTile(dense:true,title:Text('${e['category']} • ${money.format(d(e['amount']))}'),subtitle:Text('${e['distributionId']} • ${e['description']??''}')),
+    ]);
+  }
+
+  Widget _reportLine(String label,String value)=>Padding(padding:const EdgeInsets.symmetric(vertical:4),child:Row(children:[Expanded(child:Text(label)),Text(value,style:const TextStyle(fontWeight:FontWeight.w600))]));
+
   Widget _historyPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''}  -  ${_formatLpgDate(r['date'])}')),
     for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']}  -  ${_formatLpgDate(r['date'])}')),
@@ -4009,11 +4175,11 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final pages=<Widget>[_salesPage(),_borrowPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_debtsPage(),_reportPage(),_historyPage()];
+    final pages=<Widget>[_salesPage(),_borrowPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_debtsPage(),_reportPage(),_historyPage(),_distributionPage(),_distributionReportPage()];
     return Scaffold(
       appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(tooltip:'Tabung di luar',onPressed:()=>setState(()=>tab=1),icon:const Icon(Icons.outbound)),IconButton(tooltip:'Laporan harian/bulanan',onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.analytics_outlined)),IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
       body:loading?const Center(child:CircularProgressIndicator()):pages[tab],
-      floatingActionButton: tab==7 ? null : FloatingActionButton.extended(
+      floatingActionButton: (tab==7 || tab==9 || tab==10) ? null : FloatingActionButton.extended(
         heroTag: 'lpg_report_shortcut',
         backgroundColor: green,
         foregroundColor: Colors.white,
@@ -4022,7 +4188,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         label: const Text('Laporan'),
       ),
       bottomNavigationBar:Container(color:Colors.white,height:68,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
-        for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:96,padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.outbound,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.account_balance_wallet,Icons.analytics,Icons.history][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
+        for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:96,padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.outbound,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.account_balance_wallet,Icons.analytics,Icons.history,Icons.local_shipping,Icons.summarize][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
       ]))),
     );
   }
