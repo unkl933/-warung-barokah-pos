@@ -787,7 +787,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                               ),
                             ),
                             subtitle: Text(
-                              'Jual: ${currencyFormatter.format(prod.price)}  •  Stok: ${prod.getFormattedStock()}',
+                              'Jual: ${currencyFormatter.format(prod.price)}   -   Stok: ${prod.getFormattedStock()}',
                               style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                             ),
                             trailing: cartQty > 0
@@ -1754,7 +1754,7 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                           ),
                           child: ListTile(
                             title: Text(prod.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text('Stok: ${prod.getFormattedStock()}  •  Modal Satuan: ${currencyFormatter.format(prod.buyPrice)}'),
+                            subtitle: Text('Stok: ${prod.getFormattedStock()}   -   Modal Satuan: ${currencyFormatter.format(prod.buyPrice)}'),
                             trailing: ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
                               onPressed: () => showRestockDialog(prod),
@@ -3093,7 +3093,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     final qty=TextEditingController(text:'${n(loan['qty'])-n(loan['returned'])}');
     final receiver=TextEditingController(), returnedBy=TextEditingController();
     await showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('Pengembalian Tabung'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      Text('${loan['borrower']} • ${loan['variant']}'),
+      Text('${loan['borrower']}  -  ${loan['variant']}'),
       TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dikembalikan')),
       TextField(controller:returnedBy,decoration:const InputDecoration(labelText:'Diserahkan kembali oleh')),
       TextField(controller:receiver,decoration:const InputDecoration(labelText:'Diterima oleh')),
@@ -3352,7 +3352,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       title:const Text('Stock Opname Tabung'),
       content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
         DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>variant=v!),decoration:const InputDecoration(labelText:'Jenis tabung')),
-        Text('Catatan sistem: isi ${_stock(variant)['full']} • kosong ${_stock(variant)['empty']}'),
+        Text('Catatan sistem: isi ${_stock(variant)['full']}  -  kosong ${_stock(variant)['empty']}'),
         TextField(controller:full,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah fisik tabung isi')),
         TextField(controller:empty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah fisik tabung kosong')),
         TextField(controller:reason,decoration:const InputDecoration(labelText:'Alasan selisih / pemeriksaan')),
@@ -3377,7 +3377,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         child: ListTile(
           title: Text(_customerName(c)),
           subtitle: Text(
-            '${c['owner'] ?? ''} • ${c['address'] ?? ''}\\nWA: ${c['wa'] ?? '-'}',
+            '${c['owner'] ?? ''}  -  ${c['address'] ?? ''}\\nWA: ${c['wa'] ?? '-'}',
           ),
           isThreeLine: true,
           trailing: PopupMenuButton<String>(
@@ -3404,8 +3404,8 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     for(final v in lpgVariants) Builder(builder:(_){final st=_stock(v);return Card(color:const Color(0xFFE8F7EF),child:ListTile(leading:const Icon(Icons.propane_tank),title:Text(v,style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('Masih dipinjam di luar: ${st['borrowed']} tabung')));}),
     for(final loan in rows('LPG_Peminjaman').where((x)=>x['voided']!=true))
       Card(child:ListTile(
-        title:Text('${loan['borrower']} • ${loan['variant']}'),
-        subtitle:Text('Pinjam: ${loan['qty']} • Kembali: ${loan['returned']??0} • Sisa di luar: ${n(loan['qty'])-n(loan['returned'])} • ${loan['status']}\\nTanggal: ${loan['date']}\\nDiserahkan: ${loan['givenBy']} • Diterima: ${loan['receivedBy']}'),
+        title:Text('${loan['borrower']}  -  ${loan['variant']}'),
+        subtitle:Text('Pinjam: ${loan['qty']}  -  Kembali: ${loan['returned']??0}  -  Sisa di luar: ${n(loan['qty'])-n(loan['returned'])}  -  ${loan['status']}\\nTanggal: ${loan['date']}\\nDiserahkan: ${loan['givenBy']}  -  Diterima: ${loan['receivedBy']}'),
         isThreeLine:true,
         trailing:PopupMenuButton<String>(
           onSelected:(v){
@@ -3426,7 +3426,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   Widget _returnPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_leakDialog,icon:const Icon(Icons.report_problem),label:const Text('Retur Bocor dari Pelanggan')),
     FilledButton.icon(onPressed:_agentReturnDialog,icon:const Icon(Icons.local_shipping),label:const Text('Kirim Tabung Bocor ke Agen')),
-    for(final r in rows('LPG_Retur')) Card(child:ListTile(title:Text('${r['direction']} • ${r['variant']}'),subtitle:Text('${r['customer']??r['agent']??''} • ${r['qty']} tabung • ${r['status']}'))),
+    for(final r in rows('LPG_Retur')) Card(child:ListTile(title:Text('${r['direction']}  -  ${r['variant']}'),subtitle:Text('${r['customer']??r['agent']??''}  -  ${r['qty']} tabung  -  ${r['status']}'))),
   ]);
 
 
@@ -3553,7 +3553,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
             ])),
           ]),
           pw.SizedBox(height: 14),
-          pw.Text(remaining <= 0 ? 'LUNAS — Terima kasih atas pembayaran Anda.' : 'Mohon menyelesaikan sisa tagihan. Terima kasih atas kepercayaannya.', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
+          pw.Text(remaining <= 0 ? 'LUNAS - Terima kasih atas pembayaran Anda.' : 'Mohon menyelesaikan sisa tagihan. Terima kasih atas kepercayaannya.', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
           pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Dicetak: ${_formatLpgDate(DateTime.now().toIso8601String())}', style: const pw.TextStyle(fontSize: 8))),
         ],
       ));
@@ -3770,7 +3770,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
                     Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(20)), child: Text('LUNAS', style: TextStyle(color: Colors.green.shade800, fontSize: 10, fontWeight: FontWeight.bold))),
                 ]),
                 const SizedBox(height: 3),
-                Text('${r['id'] ?? ''} • ${_formatLpgDate(r['date'])}', style: TextStyle(color: Colors.grey.shade700, fontSize: 11)),
+                Text('${r['id'] ?? ''}  -  ${_formatLpgDate(r['date'])}', style: TextStyle(color: Colors.grey.shade700, fontSize: 11)),
                 const Divider(height: 12),
                 Row(children: const [
                   Expanded(flex: 4, child: Text('Jenis LPG', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
@@ -3836,13 +3836,13 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Widget _purchasePage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_purchaseDialog,icon:const Icon(Icons.add_shopping_cart),label:const Text('Catat Pembelian dari Agen')),
-    for(final r in rows('LPG_Pembelian').where((x)=>x['voided']!=true)) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${_formatLpgDate(r['date'])}'),trailing:PopupMenuButton<String>(onSelected:(v){if(v=='void')_voidLpgRecord('LPG_Pembelian',r);},itemBuilder:(_)=>const [PopupMenuItem(value:'void',child:Text('Batalkan pembelian'))],child:Text(money.format(d(r['total'])))))),
+    for(final r in rows('LPG_Pembelian').where((x)=>x['voided']!=true)) Card(child:ListTile(title:Text('${r['agent']}  -  ${r['variant']}'),subtitle:Text('${r['qty']} tabung  -  ${r['payment']}  -  ${_formatLpgDate(r['date'])}'),trailing:PopupMenuButton<String>(onSelected:(v){if(v=='void')_voidLpgRecord('LPG_Pembelian',r);},itemBuilder:(_)=>const [PopupMenuItem(value:'void',child:Text('Batalkan pembelian'))],child:Text(money.format(d(r['total'])))))),
   ]);
 
   Widget _debtsPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     for(final r in rows('LPG_Kasbon').where((x)=>x['voided']!=true)) Card(child:ListTile(
       title:Text('${r['customer']}'),
-      subtitle:Text('Penjualan: ${r['saleId']} • ${r['status']}\nTotal ${money.format(d(r['total']))} • Dibayar ${money.format(d(r['paid']))}'),
+      subtitle:Text('Penjualan: ${r['saleId']}  -  ${r['status']}\nTotal ${money.format(d(r['total']))}  -  Dibayar ${money.format(d(r['paid']))}'),
       isThreeLine:true,
       trailing: PopupMenuButton<String>(
         onSelected: (v) { if (v == 'bayar') _settleDebt(r); if (v == 'pdf') _shareDebtReceipt(r); if (v == 'edit') _editDebtDialog(r); if (v == 'delete') _deleteDebt(r); },
@@ -3882,7 +3882,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(26), build: (ctx) => [
       pw.Container(padding: const pw.EdgeInsets.all(15), decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE9F8F1), borderRadius: pw.BorderRadius.circular(7)), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
         pw.Text('PANGKALAN LPG', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
-        pw.Text('LAPORAN ${reportMonthly ? 'BULANAN' : 'HARIAN'} • $label', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+        pw.Text('LAPORAN ${reportMonthly ? 'BULANAN' : 'HARIAN'}  -  $label', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
       ])),
       pw.SizedBox(height: 14),
       pw.Text('RINGKASAN KEUANGAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
@@ -3902,14 +3902,14 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         final customer = customers.where((c) => '${c['name'] ?? c['customer'] ?? ''}' == '${r['customer']}').toList();
         final address = customer.isEmpty ? '${r['address'] ?? '-'}' : '${customer.first['address'] ?? '-'}';
         return pw.Container(margin: const pw.EdgeInsets.only(top: 6), padding: const pw.EdgeInsets.all(8), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          pw.Text('${r['customer'] ?? 'Walk-in'}  •  ${_formatLpgDate(r['date'])}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+          pw.Text('${r['customer'] ?? 'Walk-in'}   -   ${_formatLpgDate(r['date'])}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
           pw.Text('Alamat: $address', style: const pw.TextStyle(fontSize: 8)),
           pw.Table(columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(0.7), 2: const pw.FlexColumnWidth(1.5), 3: const pw.FlexColumnWidth(1.5)}, children: [
             pw.TableRow(children: ['Jenis LPG','Qty','Harga/tabung','Total'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 3), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
             ...items.map((x)=>pw.TableRow(children: ['${x['variant']??'-'}','${x['qty']??0}',money.format(d(x['unitPrice'])),money.format(d(x['total']))].map((v)=>pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 2), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
           ]),
-          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Total: ${money.format(d(r['total']))}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)), pw.Text('Bayar: ${money.format(d(r['paid']))}  •  Sisa: ${money.format(d(r['remaining']))}', style: const pw.TextStyle(fontSize: 8))]),
-          pw.Text('Metode: ${r['payment'] ?? '-'}${d(r['remaining']) > 0 ? '  •  ADA TUNGGAKAN' : ''}  •  Tabung kosong diterima: ${r['emptyReceived'] ?? 0}', style: pw.TextStyle(fontSize: 8, color: d(r['remaining']) > 0 ? PdfColors.red : PdfColors.black)),
+          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Total: ${money.format(d(r['total']))}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)), pw.Text('Bayar: ${money.format(d(r['paid']))}   -   Sisa: ${money.format(d(r['remaining']))}', style: const pw.TextStyle(fontSize: 8))]),
+          pw.Text('Metode: ${r['payment'] ?? '-'}${d(r['remaining']) > 0 ? '   -   ADA TUNGGAKAN' : ''}   -   Tabung kosong diterima: ${r['emptyReceived'] ?? 0}', style: pw.TextStyle(fontSize: 8, color: d(r['remaining']) > 0 ? PdfColors.red : PdfColors.black)),
         ]));
       }),
       pw.SizedBox(height: 14),
@@ -3996,15 +3996,15 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       for (final v in lpgVariants) Builder(builder: (_) {
         final s = _stock(v);
         final total = s['full']! + s['empty']! + s['quarantine']! + s['borrowed']! + s['inTransit']!;
-        return _card('$v • Isi / kosong / dipinjam / karantina / retur agen',
-          '${s['full']} / ${s['empty']} / ${s['borrowed']} / ${s['quarantine']} / ${s['inTransit']} • Total $total tabung', Icons.propane_tank);
+        return _card('$v  -  Isi / kosong / dipinjam / karantina / retur agen',
+          '${s['full']} / ${s['empty']} / ${s['borrowed']} / ${s['quarantine']} / ${s['inTransit']}  -  Total $total tabung', Icons.propane_tank);
       }),
     ]);
   }
 
   Widget _historyPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''} • ${_formatLpgDate(r['date'])}')),
-    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${_formatLpgDate(r['date'])}')),
+    for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''}  -  ${_formatLpgDate(r['date'])}')),
+    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']}  -  ${_formatLpgDate(r['date'])}')),
   ]);
 
   @override
