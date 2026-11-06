@@ -2992,47 +2992,164 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   }
 
   Future<void> _leakDialog() async {
-    String variant=lpgVariants.first, customer=customers.isEmpty?'Umum / Walk-in':_customerName(customers.first);
-    final qty=TextEditingController(text:'1'), reason=TextEditingController(), staff=TextEditingController();
-    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Retur Gas Bocor dari Pelanggan'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis LPG'),onChanged:(v)=>setD(()=>variant=v!)),
-      DropdownButtonFormField<String>(value:customer,items:['Umum / Walk-in',...customers.map(_customerName)].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Pelanggan'),onChanged:(v)=>setD(()=>customer=v!)),
-      TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah tabung bocor')),
-      TextField(controller:reason,decoration:const InputDecoration(labelText:'Keterangan kebocoran')),
-      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas pengganti')),
-      const Text('Pelanggan langsung diberi tabung pengganti tanpa biaya.',style:TextStyle(color:Colors.green)),
-    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
-      final q=n(qty.text), st=_stock(variant);
-      if(q<=0||st['full']!<q){_msg('Jumlah tidak valid atau stok tabung pengganti tidak cukup.');return;}
-      final id='RETUR-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
-      try{await _commit([
-        {'sheet':'LPG_Retur','id':id,'date':now,'direction':'Dari Pelanggan','customer':customer,'variant':variant,'qty':q,'reason':reason.text,'replacementImmediate':true,'staff':staff.text,'status':'Menunggu dikembalikan ke agen'},
-        {'sheet':'LPG_MutasiStok','id':id,'date':now,'variant':variant,'type':'CUSTOMER_LEAK_RETURN','qty':q,'note':'Tabung bocor dari $customer; tabung pengganti langsung diberikan'},
-        {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Retur bocor pelanggan','description':'$q $variant dari $customer','by':staff.text},
-      ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Retur dicatat. Tabung pengganti langsung diberikan.');}catch(e){_msg('Gagal: $e');}
-    },child:const Text('Simpan Retur'))]));
+    String variant = lpgVariants.first;
+    String customer = customers.isEmpty ? 'Umum / Walk-in' : _customerName(customers.first);
+    final qty = TextEditingController(text: '1');
+    final reason = TextEditingController();
+    final staff = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          return AlertDialog(
+            title: const Text('Retur Gas Bocor dari Pelanggan'),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                DropdownButtonFormField<String>(
+                  value: variant,
+                  items: lpgVariants.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                  decoration: const InputDecoration(labelText: 'Jenis LPG'),
+                  onChanged: (v) => setD(() => variant = v!),
+                ),
+                DropdownButtonFormField<String>(
+                  value: customer,
+                  items: ['Umum / Walk-in', ...customers.map(_customerName)]
+                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                      .toList(),
+                  decoration: const InputDecoration(labelText: 'Pelanggan'),
+                  onChanged: (v) => setD(() => customer = v!),
+                ),
+                TextField(controller: qty, keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Jumlah tabung bocor')),
+                TextField(controller: reason,
+                    decoration: const InputDecoration(labelText: 'Keterangan kebocoran')),
+                TextField(controller: staff,
+                    decoration: const InputDecoration(labelText: 'Petugas pengganti')),
+                const Text('Pelanggan langsung diberi tabung pengganti tanpa biaya.',
+                    style: TextStyle(color: Colors.green)),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+              FilledButton(
+                onPressed: () async {
+                  final q = n(qty.text);
+                  final st = _stock(variant);
+                  if (q <= 0 || st['full']! < q) {
+                    _msg('Jumlah tidak valid atau stok tabung pengganti tidak cukup.');
+                    return;
+                  }
+                  final id = 'RETUR-${DateTime.now().millisecondsSinceEpoch}';
+                  final now = dateNow();
+                  try {
+                    await _commit([
+                      {'sheet': 'LPG_Retur', 'id': id, 'date': now,
+                        'direction': 'Dari Pelanggan', 'customer': customer,
+                        'variant': variant, 'qty': q, 'reason': reason.text,
+                        'replacementImmediate': true, 'staff': staff.text,
+                        'status': 'Menunggu dikembalikan ke agen'},
+                      {'sheet': 'LPG_MutasiStok', 'id': id, 'date': now,
+                        'variant': variant, 'type': 'CUSTOMER_LEAK_RETURN', 'qty': q,
+                        'note': 'Tabung bocor dari $customer; tabung pengganti langsung diberikan'},
+                      {'sheet': 'LPG_Riwayat', 'id': id, 'date': now,
+                        'activity': 'Retur bocor pelanggan',
+                        'description': '$q $variant dari $customer', 'by': staff.text},
+                    ]);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    _msg('Retur dicatat. Tabung pengganti langsung diberikan.');
+                  } catch (e) {
+                    _msg('Gagal: $e');
+                  }
+                },
+                child: const Text('Simpan Retur'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _agentReturnDialog() async {
-    String variant=lpgVariants.first, agent=lpgAgents.first;
-    final qty=TextEditingController(text:'1'), replacement=TextEditingController(text:'0'), staff=TextEditingController();
-    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Retur Tabung Bocor ke Agen'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField(value:agent,items:lpgAgents.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Agen'),onChanged:(v)=>setD(()=>agent=v!)),
-      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),decoration:const InputDecoration(labelText:'Jenis tabung'),onChanged:(v)=>setD(()=>variant=v!)),
-      TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah dikirim')),
-      TextField(controller:replacement,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung pengganti isi diterima sekarang')),
-      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas')),
-    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
-      final q=n(qty.text), rep=n(replacement.text), st=_stock(variant);
-      if(q<=0||st['quarantine']!<q||rep<0||rep>q){_msg('Jumlah retur atau tabung pengganti tidak valid.');return;}
-      final id='RETUR-AGEN-${DateTime.now().millisecondsSinceEpoch}', now=dateNow();
-      try{await _commit([
-        {'sheet':'LPG_Retur','id':id,'date':now,'direction':'Ke Agen','agent':agent,'variant':variant,'qty':q,'replacementQty':rep,'staff':staff.text,'status':rep>=q?'Selesai':'Menunggu penggantian'},
-        {'sheet':'LPG_MutasiStok','id':'$id-Q','date':now,'variant':variant,'type':'AGENT_LEAK_RETURN','qty':q,'note':'Retur bocor ke $agent'},
-        if(rep>0) {'sheet':'LPG_MutasiStok','id':'$id-R','date':now,'variant':variant,'type':'AGENT_REPLACEMENT_FULL','qty':rep,'note':'Pengganti dari $agent'},
-          if(rep>0) {'sheet':'LPG_MutasiStok','id':'$id-RCV','date':now,'variant':variant,'type':'AGENT_REPLACEMENT_RECEIVED','qty':rep,'note':'Penerimaan pengganti dari $agent'},
-      ]);if(ctx.mounted)Navigator.pop(ctx);_msg('Retur agen tersimpan.');}catch(e){_msg('Gagal: $e');}
-    },child:const Text('Simpan Retur Agen'))]));
+    String variant = lpgVariants.first;
+    String agent = lpgAgents.first;
+    final qty = TextEditingController(text: '1');
+    final replacement = TextEditingController(text: '0');
+    final staff = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          return AlertDialog(
+            title: const Text('Retur Tabung Bocor ke Agen'),
+            content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                DropdownButtonFormField<String>(
+                  value: agent,
+                  items: lpgAgents.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                  decoration: const InputDecoration(labelText: 'Agen'),
+                  onChanged: (v) => setD(() => agent = v!),
+                ),
+                DropdownButtonFormField<String>(
+                  value: variant,
+                  items: lpgVariants.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                  decoration: const InputDecoration(labelText: 'Jenis tabung'),
+                  onChanged: (v) => setD(() => variant = v!),
+                ),
+                TextField(controller: qty, keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Jumlah dikirim')),
+                TextField(controller: replacement, keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Tabung pengganti isi diterima sekarang')),
+                TextField(controller: staff,
+                    decoration: const InputDecoration(labelText: 'Petugas')),
+              ]),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+              FilledButton(
+                onPressed: () async {
+                  final q = n(qty.text);
+                  final rep = n(replacement.text);
+                  final st = _stock(variant);
+                  if (q <= 0 || st['quarantine']! < q || rep < 0 || rep > q) {
+                    _msg('Jumlah retur atau tabung pengganti tidak valid.');
+                    return;
+                  }
+                  final id = 'RETUR-AGEN-${DateTime.now().millisecondsSinceEpoch}';
+                  final now = dateNow();
+                  try {
+                    await _commit([
+                      {'sheet': 'LPG_Retur', 'id': id, 'date': now,
+                        'direction': 'Ke Agen', 'agent': agent, 'variant': variant,
+                        'qty': q, 'replacementQty': rep, 'staff': staff.text,
+                        'status': rep >= q ? 'Selesai' : 'Menunggu penggantian'},
+                      {'sheet': 'LPG_MutasiStok', 'id': '$id-Q', 'date': now,
+                        'variant': variant, 'type': 'AGENT_LEAK_RETURN', 'qty': q,
+                        'note': 'Retur bocor ke $agent'},
+                      if (rep > 0)
+                        {'sheet': 'LPG_MutasiStok', 'id': '$id-R', 'date': now,
+                          'variant': variant, 'type': 'AGENT_REPLACEMENT_FULL', 'qty': rep,
+                          'note': 'Pengganti dari $agent'},
+                      if (rep > 0)
+                        {'sheet': 'LPG_MutasiStok', 'id': '$id-RCV', 'date': now,
+                          'variant': variant, 'type': 'AGENT_REPLACEMENT_RECEIVED', 'qty': rep,
+                          'note': 'Penerimaan pengganti dari $agent'},
+                    ]);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    _msg('Retur agen tersimpan.');
+                  } catch (e) {
+                    _msg('Gagal: $e');
+                  }
+                },
+                child: const Text('Simpan Retur Agen'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Widget _card(String title, String value, IconData icon) => Card(child:Padding(padding:const EdgeInsets.all(12),child:Row(children:[Icon(icon,color:green,size:28),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontSize:12,color:Colors.black54)),Text(value,style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))]))])));
@@ -3044,19 +3161,58 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   ]);
 
   Future<void> _openingDialog() async {
-    String variant=lpgVariants.first; final full=TextEditingController(text:'0'), empty=TextEditingController(text:'0'), staff=TextEditingController();
-    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Stok Awal LPG'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField(value:variant,items:lpgVariants.map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>variant=v!),decoration:const InputDecoration(labelText:'Jenis')),
-      TextField(controller:full,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung isi di gudang')),
-      TextField(controller:empty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Tabung kosong di gudang')),
-      TextField(controller:staff,decoration:const InputDecoration(labelText:'Petugas')),
-    ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
-      final id='OPEN-${DateTime.now().millisecondsSinceEpoch}',now=dateNow();
-      try{await _commit([
-        {'sheet':'LPG_MutasiStok','id':'$id-F','date':now,'variant':variant,'type':'OPEN_FULL','qty':n(full.text),'note':'Stok awal oleh ${staff.text}'},
-        {'sheet':'LPG_MutasiStok','id':'$id-E','date':now,'variant':variant,'type':'OPEN_EMPTY','qty':n(empty.text),'note':'Stok awal oleh ${staff.text}'},
-      ]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal: $e');}
-    },child:const Text('Simpan Stok Awal'))]));
+    String variant = lpgVariants.first;
+    final full = TextEditingController(text: '0');
+    final empty = TextEditingController(text: '0');
+    final staff = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          return AlertDialog(
+            title: const Text('Stok Awal LPG'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                value: variant,
+                items: lpgVariants.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                onChanged: (v) => setD(() => variant = v!),
+                decoration: const InputDecoration(labelText: 'Jenis'),
+              ),
+              TextField(controller: full, keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Tabung isi di gudang')),
+              TextField(controller: empty, keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Tabung kosong di gudang')),
+              TextField(controller: staff,
+                  decoration: const InputDecoration(labelText: 'Petugas')),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+              FilledButton(
+                onPressed: () async {
+                  final id = 'OPEN-${DateTime.now().millisecondsSinceEpoch}';
+                  final now = dateNow();
+                  try {
+                    await _commit([
+                      {'sheet': 'LPG_MutasiStok', 'id': '$id-F', 'date': now,
+                        'variant': variant, 'type': 'OPEN_FULL', 'qty': n(full.text),
+                        'note': 'Stok awal oleh ${staff.text}'},
+                      {'sheet': 'LPG_MutasiStok', 'id': '$id-E', 'date': now,
+                        'variant': variant, 'type': 'OPEN_EMPTY', 'qty': n(empty.text),
+                        'note': 'Stok awal oleh ${staff.text}'},
+                    ]);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  } catch (e) {
+                    _msg('Gagal: $e');
+                  }
+                },
+                child: const Text('Simpan Stok Awal'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
 
