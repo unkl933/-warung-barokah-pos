@@ -3488,33 +3488,88 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   Future<void> _shareDebtReceipt(Map<String,dynamic> debt) async {
     try {
       final doc = pw.Document();
-      doc.addPage(pw.Page(
+      final sale = rows('LPG_Penjualan').where((x) => '${x['id']}' == '${debt['saleId']}').cast<Map<String,dynamic>?>().firstWhere((x) => x != null, orElse: () => null);
+      List<Map<String,dynamic>> items = [];
+      if (sale != null) {
+        try {
+          final raw = jsonDecode('${sale['items'] ?? ''}');
+          if (raw is List) items = raw.map((e) => Map<String,dynamic>.from(e as Map)).toList();
+        } catch (_) {}
+        if (items.isEmpty) {
+          items = [{'variant': sale['variant'] ?? '-', 'qty': sale['qty'] ?? 0, 'unitPrice': sale['unitPrice'] ?? 0, 'total': sale['total'] ?? debt['total']}];
+        }
+      }
+      final payments = rows('LPG_Pembayaran').where((x) => x['voided'] != true && ('${x['debtId'] ?? ''}' == '${debt['id']}' || '${x['saleId'] ?? ''}' == '${debt['saleId']}')).toList()
+        ..sort((a,b) => '${a['date']}'.compareTo('${b['date']}'));
+      final customer = customers.where((x) => '${x['name'] ?? x['customer'] ?? ''}' == '${debt['customer']}').toList();
+      final address = customer.isEmpty ? (sale?['address'] ?? '-') : (customer.first['address'] ?? '-');
+      final total = d(debt['total']);
+      final paid = d(debt['paid']);
+      final remaining = d(debt['remaining']);
+      doc.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a5,
-        build: (ctx) => pw.Padding(
-          padding: const pw.EdgeInsets.all(20),
-          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            pw.Center(child: pw.Text('NOTA PENAGIHAN KASBON LPG', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
-            pw.Divider(),
-            pw.Text('No. Kasbon: ${debt['id']}'),
-            pw.Text('Tanggal: ${_formatLpgDate(debt['date'])}'),
-            pw.Text('Pelanggan: ${debt['customer']}'),
-            pw.Text('No. Penjualan: ${debt['saleId']}'),
-            pw.SizedBox(height: 18),
-            pw.Text('Total tagihan: ${money.format(d(debt['total']))}'),
-            pw.Text('Sudah dibayar: ${money.format(d(debt['paid']))}'),
-            pw.Text('Sisa harus dibayar: ${money.format(d(debt['remaining']))}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
-            pw.SizedBox(height: 24),
-            pw.Text('Mohon melakukan pembayaran. Terima kasih.'),
-            pw.Spacer(),
-            pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Pangkalan LPG')),
+        margin: const pw.EdgeInsets.all(26),
+        build: (ctx) => [
+          pw.Container(
+            padding: const pw.EdgeInsets.all(14),
+            decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE9F8F1), borderRadius: pw.BorderRadius.circular(8)),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text('PANGKALAN LPG', style: pw.TextStyle(fontSize: 19, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
+              pw.Text('NOTA TAGIHAN & RIWAYAT PELUNASAN', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            ]),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('No. Nota: ${debt['id']}'), pw.Text(_formatLpgDate(debt['date']))]),
+          pw.Text('No. Penjualan: ${debt['saleId'] ?? '-'}'),
+          pw.Text('Pelanggan: ${debt['customer'] ?? '-'}'),
+          pw.Text('Alamat: $address'),
+          pw.Divider(),
+          pw.Text('RINCIAN BARANG', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
+          pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), columnWidths: {0: const pw.FlexColumnWidth(3), 1: const pw.FlexColumnWidth(1), 2: const pw.FlexColumnWidth(2), 3: const pw.FlexColumnWidth(2)}, children: [
+            pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Jenis LPG', 'Qty', 'Harga/tabung', 'Jumlah'].map((v) => pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(v, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)))).toList()),
+            ...items.map((x) => pw.TableRow(children: [
+              pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('${x['variant'] ?? '-'}', style: const pw.TextStyle(fontSize: 8))),
+              pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('${x['qty'] ?? 0}', style: const pw.TextStyle(fontSize: 8))),
+              pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(money.format(d(x['unitPrice'])), style: const pw.TextStyle(fontSize: 8))),
+              pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(money.format(d(x['total'])), style: const pw.TextStyle(fontSize: 8))),
+            ])),
           ]),
-        ),
+          pw.SizedBox(height: 10),
+          pw.Container(padding: const pw.EdgeInsets.all(10), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400), borderRadius: pw.BorderRadius.circular(6)), child: pw.Column(children: [
+            _pdfMoneyRow('Total tagihan', money.format(total)),
+            _pdfMoneyRow('DP / pembayaran awal', money.format(paid)),
+            _pdfMoneyRow('SISA TAGIHAN', money.format(remaining), bold: true, color: remaining > 0 ? PdfColors.red : PdfColors.green800),
+          ])),
+          pw.SizedBox(height: 12),
+          pw.Text('RIWAYAT PEMBAYARAN', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
+          if (payments.isEmpty) pw.Text('Belum ada pembayaran tercatat.', style: const pw.TextStyle(fontSize: 9)),
+          if (payments.isNotEmpty) pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+            pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Tanggal', 'Metode', 'Jumlah', 'Petugas'].map((v) => pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)))).toList()),
+            ...payments.map((x) => pw.TableRow(children: [
+              pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(_formatLpgDate(x['date']), style: const pw.TextStyle(fontSize: 7))),
+              pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('${x['method'] ?? '-'}', style: const pw.TextStyle(fontSize: 7))),
+              pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(money.format(d(x['amount'])), style: const pw.TextStyle(fontSize: 7))),
+              pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('${x['staff'] ?? '-'}', style: const pw.TextStyle(fontSize: 7))),
+            ])),
+          ]),
+          pw.SizedBox(height: 14),
+          pw.Text(remaining <= 0 ? 'LUNAS — Terima kasih atas pembayaran Anda.' : 'Mohon menyelesaikan sisa tagihan. Terima kasih atas kepercayaannya.', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
+          pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Dicetak: ${_formatLpgDate(DateTime.now().toIso8601String())}', style: const pw.TextStyle(fontSize: 8))),
+        ],
       ));
-      await Printing.sharePdf(bytes: await doc.save(), filename: 'Nota_Kasbon_LPG_${debt['id']}.pdf');
+      await Printing.sharePdf(bytes: await doc.save(), filename: 'Nota_Tagihan_Pelunasan_LPG_${debt['id']}.pdf');
     } catch (e) {
       _msg('Gagal membuat nota PDF: $e');
     }
   }
+
+  pw.Widget _pdfMoneyRow(String label, String value, {bool bold = false, PdfColor? color}) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 3),
+    child: pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+      pw.Text(label, style: pw.TextStyle(fontSize: 9, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal, color: color)),
+      pw.Text(value, style: pw.TextStyle(fontSize: bold ? 12 : 9, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal, color: color)),
+    ]),
+  );
 
   Future<void> _settleDebt(Map<String,dynamic> debt) async {
     String method='Tunai';
@@ -3812,30 +3867,88 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   }
 
   Future<void> _shareLpgReportPdf() async {
-    final sales=rows('LPG_Penjualan').where(_inReportPeriod).where((r)=>r['voided']!=true).toList();
-    final purchases=rows('LPG_Pembelian').where(_inReportPeriod).where((r)=>r['voided']!=true).toList();
-    final payments=rows('LPG_Pembayaran').where(_inReportPeriod).where((r)=>r['voided']!=true).toList();
-    final totalSales=sales.fold<double>(0,(a,r)=>a+d(r['total']));
-    final totalPurchases=purchases.fold<double>(0,(a,r)=>a+d(r['total']));
-    final cash=payments.where((r)=>r['method']=='Tunai').fold<double>(0,(a,r)=>a+d(r['amount']));
-    final qris=payments.where((r)=>r['method']=='QRIS').fold<double>(0,(a,r)=>a+d(r['amount']));
-    final label=reportMonthly?DateFormat('MMMM yyyy','id_ID').format(reportDate):DateFormat('dd MMMM yyyy','id_ID').format(reportDate);
-    final doc=pw.Document();
-    doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a4,margin:const pw.EdgeInsets.all(28),build:(ctx)=>[
-      pw.Container(padding:const pw.EdgeInsets.all(16),color:PdfColor.fromInt(0xFFE9F8F1),child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Text('PANGKALAN LPG',style:pw.TextStyle(fontSize:20,fontWeight:pw.FontWeight.bold,color:PdfColor.fromInt(0xFF087F5B))),pw.Text('LAPORAN ${reportMonthly?'BULANAN':'HARIAN'} • $label')])),
-      pw.SizedBox(height:18),
-      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[
-        for(final pair in <List<String>>[['Penjualan',money.format(totalSales)],['Pembelian',money.format(totalPurchases)],['Penerimaan Tunai',money.format(cash)],['Penerimaan QRIS',money.format(qris)],['Kasbon aktif',money.format(rows('LPG_Kasbon').where((r)=>r['status']!='Lunas'&&r['voided']!=true).fold<double>(0,(a,r)=>a+d(r['remaining']))) ]])pw.TableRow(children:pair.map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(9),child:pw.Text(v))).toList())
+    final sales = rows('LPG_Penjualan').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final purchases = rows('LPG_Pembelian').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final payments = rows('LPG_Pembayaran').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final loans = rows('LPG_Peminjaman').where((r) => r['voided'] != true).toList();
+    final consignments = [...rows('LPG_TitipanTabung'), ...rows('LPG_Titipan')].where((r) => r['voided'] != true).toList();
+    final totalSales = sales.fold<double>(0, (a,r) => a + d(r['total']));
+    final totalPurchases = purchases.fold<double>(0, (a,r) => a + d(r['total']));
+    final cash = payments.where((r) => r['method'] == 'Tunai').fold<double>(0,(a,r)=>a+d(r['amount']));
+    final qris = payments.where((r) => r['method'] == 'QRIS').fold<double>(0,(a,r)=>a+d(r['amount']));
+    final activeDebt = rows('LPG_Kasbon').where((r)=>r['status']!='Lunas' && r['voided']!=true).fold<double>(0,(a,r)=>a+d(r['remaining']));
+    final label = reportMonthly ? DateFormat('MMMM yyyy','id_ID').format(reportDate) : DateFormat('dd MMMM yyyy','id_ID').format(reportDate);
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(pageFormat: PdfPageFormat.a4, margin: const pw.EdgeInsets.all(26), build: (ctx) => [
+      pw.Container(padding: const pw.EdgeInsets.all(15), decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFFE9F8F1), borderRadius: pw.BorderRadius.circular(7)), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+        pw.Text('PANGKALAN LPG', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFF087F5B))),
+        pw.Text('LAPORAN ${reportMonthly ? 'BULANAN' : 'HARIAN'} • $label', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+      ])),
+      pw.SizedBox(height: 14),
+      pw.Text('RINGKASAN KEUANGAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        for (final pair in <List<String>>[
+          ['Total penjualan', money.format(totalSales)], ['Total pembelian agen', money.format(totalPurchases)],
+          ['Penerimaan tunai', money.format(cash)], ['Penerimaan QRIS', money.format(qris)], ['Sisa kasbon aktif', money.format(activeDebt)],
+          ['Jumlah transaksi penjualan', '${sales.length}'], ['Jumlah transaksi pembelian', '${purchases.length}'],
+        ]) pw.TableRow(children: pair.map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(7), child: pw.Text(v, style: const pw.TextStyle(fontSize: 9)))).toList()),
       ]),
-      pw.SizedBox(height:18),pw.Text('Rincian Penjualan',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
-      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Pelanggan','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...sales.map((r)=>pw.TableRow(children:['${_formatLpgDate(r['date'])}','${r['customer']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
-      pw.SizedBox(height:18),pw.Text('Rincian Pembelian',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
-      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Agen','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...purchases.map((r)=>pw.TableRow(children:['${_formatLpgDate(r['date'])}','${r['agent']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
-      pw.SizedBox(height:16),pw.Text('Stok saat laporan dibuat',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
-      for(final v in lpgVariants)pw.Text('$v: isi ${_stock(v)['full']}, kosong ${_stock(v)['empty']}, dipinjam ${_stock(v)['borrowed']}, karantina ${_stock(v)['quarantine']}'),
-      pw.SizedBox(height:24),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Text('Dicetak: ${_formatLpgDate(DateTime.now().toIso8601String())}')),
+      pw.SizedBox(height: 16),
+      pw.Text('RINCIAN PENJUALAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      ...sales.map((r) {
+        List<Map<String,dynamic>> items = [];
+        try { final raw=jsonDecode('${r['items'] ?? ''}'); if(raw is List) items=raw.map((e)=>Map<String,dynamic>.from(e as Map)).toList(); } catch (_) {}
+        if(items.isEmpty) items=[{'variant':r['variant']??'-','qty':r['qty']??0,'unitPrice':r['unitPrice']??0,'total':r['total']??0}];
+        final customer = customers.where((c) => '${c['name'] ?? c['customer'] ?? ''}' == '${r['customer']}').toList();
+        final address = customer.isEmpty ? '${r['address'] ?? '-'}' : '${customer.first['address'] ?? '-'}';
+        return pw.Container(margin: const pw.EdgeInsets.only(top: 6), padding: const pw.EdgeInsets.all(8), decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)), child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Text('${r['customer'] ?? 'Walk-in'}  •  ${_formatLpgDate(r['date'])}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Alamat: $address', style: const pw.TextStyle(fontSize: 8)),
+          pw.Table(columnWidths: {0: const pw.FlexColumnWidth(2), 1: const pw.FlexColumnWidth(0.7), 2: const pw.FlexColumnWidth(1.5), 3: const pw.FlexColumnWidth(1.5)}, children: [
+            pw.TableRow(children: ['Jenis LPG','Qty','Harga/tabung','Total'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 3), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+            ...items.map((x)=>pw.TableRow(children: ['${x['variant']??'-'}','${x['qty']??0}',money.format(d(x['unitPrice'])),money.format(d(x['total']))].map((v)=>pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 2), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
+          ]),
+          pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('Total: ${money.format(d(r['total']))}', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)), pw.Text('Bayar: ${money.format(d(r['paid']))}  •  Sisa: ${money.format(d(r['remaining']))}', style: const pw.TextStyle(fontSize: 8))]),
+          pw.Text('Metode: ${r['payment'] ?? '-'}${d(r['remaining']) > 0 ? '  •  ADA TUNGGAKAN' : ''}  •  Tabung kosong diterima: ${r['emptyReceived'] ?? 0}', style: pw.TextStyle(fontSize: 8, color: d(r['remaining']) > 0 ? PdfColors.red : PdfColors.black)),
+        ]));
+      }),
+      pw.SizedBox(height: 14),
+      pw.Text('RINCIAN PEMBELIAN AGEN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Tanggal','Agen','Jenis','Jumlah','Harga beli','Total'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+        ...purchases.map((r)=>pw.TableRow(children: ['${_formatLpgDate(r['date'])}','${r['agent']??'-'}','${r['variant']??'-'}','${r['qty']??0}',money.format(d(r['unitPrice'])),money.format(d(r['total']))].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
+      ]),
+      pw.SizedBox(height: 14),
+      pw.Text('DAFTAR KASBON / TUNGGAKAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Pelanggan','No. Penjualan','Tanggal','Total','DP dibayar','Sisa'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+        ...rows('LPG_Kasbon').where((r)=>r['voided']!=true && d(r['remaining'])>0).map((r)=>pw.TableRow(children: ['${r['customer']??'-'}','${r['saleId']??'-'}','${_formatLpgDate(r['date'])}',money.format(d(r['total'])),money.format(d(r['paid'])),money.format(d(r['remaining']))].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
+      ]),
+      pw.SizedBox(height: 14),
+      pw.Text('TABUNG DIPINJAM / BERADA DI LUAR', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Peminjam','Jenis','Tanggal pinjam','Jumlah','Kembali','Sisa di luar','Petugas'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+        ...loans.where((r)=>n(r['qty'])-n(r['returned'])>0).map((r)=>pw.TableRow(children: ['${r['borrower']??'-'}','${r['variant']??'-'}','${_formatLpgDate(r['date'])}','${r['qty']??0}','${r['returned']??0}','${n(r['qty'])-n(r['returned'])}','${r['givenBy']??'-'}'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
+      ]),
+      if (consignments.isNotEmpty) ...[
+        pw.SizedBox(height: 12), pw.Text('TABUNG TITIPAN', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+        pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+          pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Nama penitip','Jenis','Jumlah','Tanggal','Keterangan'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+          ...consignments.map((r)=>pw.TableRow(children: ['${r['customer']??r['owner']??r['name']??'-'}','${r['variant']??r['type']??'-'}','${r['qty']??r['quantity']??0}','${_formatLpgDate(r['date'])}','${r['note']??r['status']??'-'}'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: const pw.TextStyle(fontSize: 7)))).toList())),
+        ]),
+      ],
+      pw.SizedBox(height: 14),
+      pw.Text('REKAP INVENTARIS TABUNG', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+      pw.Table(border: pw.TableBorder.all(color: PdfColors.grey300), children: [
+        pw.TableRow(decoration: const pw.BoxDecoration(color: PdfColors.grey200), children: ['Jenis','Isi di gudang','Kosong di gudang','Dipinjam di luar','Total gudang (isi+kosong)'].map((v)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(v, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)))).toList()),
+        ...lpgVariants.map((v) { final st=_stock(v); return pw.TableRow(children: [v,'${st['full']}','${st['empty']}','${st['borrowed']}','${st['full']!+st['empty']!}'].map((x)=>pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(x, style: const pw.TextStyle(fontSize: 8)))).toList()); }),
+      ]),
+      pw.SizedBox(height: 8),
+      pw.Text('Total semua jenis: isi ${lpgVariants.fold<int>(0,(a,v)=>a+_stock(v)['full']!)}, kosong ${lpgVariants.fold<int>(0,(a,v)=>a+_stock(v)['empty']!)}, dipinjam ${lpgVariants.fold<int>(0,(a,v)=>a+_stock(v)['borrowed']!)}, total di gudang ${lpgVariants.fold<int>(0,(a,v)=>a+_stock(v)['full']!+_stock(v)['empty']!)} tabung.', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+      pw.SizedBox(height: 16),
+      pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Dicetak: ${_formatLpgDate(DateTime.now().toIso8601String())}', style: const pw.TextStyle(fontSize: 8))),
     ]));
-    await Printing.sharePdf(bytes:await doc.save(),filename:'Laporan_LPG_${reportMonthly?'Bulanan':'Harian'}_${DateFormat('yyyyMMdd').format(reportDate)}.pdf');
+    await Printing.sharePdf(bytes: await doc.save(), filename: 'Laporan_LPG_${reportMonthly ? 'Bulanan' : 'Harian'}_${DateFormat('yyyyMMdd').format(reportDate)}.pdf');
   }
 
   Widget _reportPage() {
