@@ -3296,7 +3296,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
               PopupMenuItem(value: 'edit', child: Text('Edit')),
               PopupMenuItem(value: 'delete', child: Text('Hapus')),
             ],
-            child: Text('3kg ${money.format(d(c['price_3']))}'),
+            child: Row(mainAxisSize:MainAxisSize.min,children:[Text('3kg ${money.format(d(c['price_3']))}'),const SizedBox(width:4),const Icon(Icons.more_vert)]),
           ),
         ),
       ),
@@ -3304,7 +3304,25 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Widget _borrowPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_borrowDialog,icon:const Icon(Icons.add),label:const Text('Catat Peminjaman Tabung')),
-    for(final loan in rows('LPG_Peminjaman')) Card(child:ListTile(title:Text('${loan['borrower']} • ${loan['variant']}'),subtitle:Text('Pinjam: ${loan['qty']} • Kembali: ${loan['returned']??0} • ${loan['status']}\nTanggal: ${loan['date']}\nDiserahkan: ${loan['givenBy']} • Diterima: ${loan['receivedBy']}'),isThreeLine:true,trailing:IconButton(icon:const Icon(Icons.assignment_return,color:Colors.green),onPressed:loan['status']=='Sudah dikembalikan'?null:()=>_returnBorrowDialog(loan)))),
+    for(final loan in rows('LPG_Peminjaman').where((x)=>x['voided']!=true))
+      Card(child:ListTile(
+        title:Text('${loan['borrower']} • ${loan['variant']}'),
+        subtitle:Text('Pinjam: ${loan['qty']} • Kembali: ${loan['returned']??0} • Sisa di luar: ${n(loan['qty'])-n(loan['returned'])} • ${loan['status']}\\nTanggal: ${loan['date']}\\nDiserahkan: ${loan['givenBy']} • Diterima: ${loan['receivedBy']}'),
+        isThreeLine:true,
+        trailing:PopupMenuButton<String>(
+          onSelected:(v){
+            if(v=='edit')_editLoanDialog(loan);
+            if(v=='return' && loan['status']!='Sudah dikembalikan')_returnBorrowDialog(loan);
+            if(v=='delete')_deleteLoan(loan);
+          },
+          itemBuilder:(_)=>[
+            const PopupMenuItem(value:'edit',child:Text('Edit peminjaman')),
+            if(loan['status']!='Sudah dikembalikan')const PopupMenuItem(value:'return',child:Text('Catat pengembalian')),
+            const PopupMenuItem(value:'delete',child:Text('Hapus peminjaman')),
+          ],
+          child:const Icon(Icons.more_vert),
+        ),
+      )),
   ]);
 
   Widget _returnPage()=>ListView(padding:const EdgeInsets.all(12),children:[
@@ -3426,15 +3444,157 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     )));
   }
 
+
+  Future<void> _editSaleDialog(Map<String,dynamic> sale) async {
+    final qtyC=TextEditingController(text:'${sale['qty']}');
+    final priceC=TextEditingController(text:'${sale['unitPrice']}');
+    final customerC=TextEditingController(text:'${sale['customer']}');
+    final buyerC=TextEditingController(text:'${sale['buyer']??''}');
+    final staffC=TextEditingController(text:'${sale['staff']??''}');
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Edit Penjualan LPG'),
+      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:customerC,decoration:const InputDecoration(labelText:'Pelanggan')),
+        TextField(controller:buyerC,decoration:const InputDecoration(labelText:'Nama pembeli')),
+        TextField(controller:qtyC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah tabung')),
+        TextField(controller:priceC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga per tabung')),
+        TextField(controller:staffC,decoration:const InputDecoration(labelText:'Petugas')),
+        const Text('Metode pembayaran tidak diubah pada menu edit ini.'),
+      ])),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),
+        FilledButton(onPressed:()async{
+          final oldQty=n(sale['qty']), newQty=n(qtyC.text), price=d(priceC.text);
+          if(newQty<=0||price<=0||customerC.text.trim().isEmpty){_msg('Data penjualan tidak valid.');return;}
+          final stockNow=_stock('${sale['variant']}');
+          if(newQty>oldQty && stockNow['full']! < (newQty-oldQty)){_msg('Stok LPG isi tidak cukup untuk menambah jumlah penjualan.');return;}
+          final total=newQty*price, oldTotal=d(sale['total']);
+          final paid=d(sale['paid']);
+          if(paid>total){_msg('Total baru tidak boleh lebih kecil dari pembayaran yang sudah diterima.');return;}
+          final id='${sale['id']}', now=dateNow();
+          final updated={...sale,'customer':customerC.text.trim(),'buyer':buyerC.text,'staff':staffC.text,'qty':newQty,'unitPrice':price,'total':total,'remaining':total-paid,'editedAt':now};
+          final records=<Map<String,dynamic>>[
+            {'sheet':'LPG_Penjualan',...updated},
+            {'sheet':'LPG_MutasiStok','id':'$id-FULL','date':now,'variant':sale['variant'],'type':'SALE_FULL','qty':newQty,'note':'Penjualan $id (diperbarui)'},
+            {'sheet':'LPG_MutasiStok','id':'$id-EMPTY','date':now,'variant':sale['variant'],'type':'SALE_EMPTY_IN','qty':newQty,'note':'Tabung kosong dari pelanggan $id (diperbarui)'},
+          ];
+          final oldPayments=rows('LPG_Pembayaran').where((x)=>x['saleId']==id && x['voided']!=true).toList();
+          final oldPaid=oldPayments.fold<double>(0,(a,x)=>a+d(x['amount']));
+          for(final paymentRow in oldPayments){
+            final ratio=oldPaid<=0?0:d(paymentRow['amount'])/oldPaid;
+            records.add({'sheet':'LPG_Pembayaran',...paymentRow,'amount':paid*ratio,'editedAt':now});
+          }
+          final debts=rows('LPG_Kasbon').where((x)=>x['saleId']==id && x['voided']!=true).toList();
+          if(debts.isNotEmpty){
+            final debt=debts.first;
+            records.add({'sheet':'LPG_Kasbon','id':debt['id'],'date':debt['date'],'customer':customerC.text.trim(),'saleId':id,'total':total,'paid':paid,'remaining':total-paid,'status':total-paid<=0?'Lunas':'Belum Lunas'});
+          } else if(total-paid>0){
+            records.add({'sheet':'LPG_Kasbon','id':'$id-DEBT','date':sale['date'],'customer':customerC.text.trim(),'saleId':id,'total':total,'paid':paid,'remaining':total-paid,'status':'Belum Lunas'});
+          }
+          records.add({'sheet':'LPG_Riwayat','id':'EDIT-$id-$now','date':now,'activity':'Edit penjualan','description':'Penjualan $id diperbarui; total ${money.format(oldTotal)} menjadi ${money.format(total)}','by':staffC.text});
+          try{await _commit(records);if(ctx.mounted)Navigator.pop(ctx);_msg('Penjualan diperbarui.');}catch(e){_msg('Gagal edit: $e');}
+        },child:const Text('Simpan Perubahan'))
+      ],
+    ));
+  }
+
+  Future<void> _editLoanDialog(Map<String,dynamic> loan) async {
+    if(n(loan['returned'])>0){_msg('Peminjaman yang sudah memiliki pengembalian tidak bisa diubah jumlahnya.');return;}
+    final borrower=TextEditingController(text:'${loan['borrower']}');
+    final qty=TextEditingController(text:'${loan['qty']}');
+    final given=TextEditingController(text:'${loan['givenBy']??''}');
+    final received=TextEditingController(text:'${loan['receivedBy']??''}');
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Edit Peminjaman Tabung'),
+      content:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:borrower,decoration:const InputDecoration(labelText:'Nama peminjam')),
+        TextField(controller:qty,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah tabung')),
+        TextField(controller:given,decoration:const InputDecoration(labelText:'Diserahkan oleh')),
+        TextField(controller:received,decoration:const InputDecoration(labelText:'Diterima oleh')),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),
+        FilledButton(onPressed:()async{
+          final q=n(qty.text), old=n(loan['qty']);
+          if(q<=0||borrower.text.trim().isEmpty){_msg('Nama dan jumlah wajib diisi.');return;}
+          final stockNow=_stock('${loan['variant']}');
+          if(q>old && stockNow['empty']! < (q-old)){_msg('Stok tabung kosong tidak cukup untuk menambah jumlah pinjaman.');return;}
+          final id='${loan['id']}', now=dateNow();
+          try{
+            await _commit([
+              {'sheet':'LPG_Peminjaman',...loan,'borrower':borrower.text.trim(),'qty':q,'givenBy':given.text,'receivedBy':received.text,'editedAt':now},
+              {'sheet':'LPG_MutasiStok','id':id,'date':loan['date'],'variant':loan['variant'],'type':'BORROW_EMPTY','qty':q,'note':'Dipinjam ${borrower.text.trim()} (diperbarui)'},
+              {'sheet':'LPG_Riwayat','id':'EDIT-$id-$now','date':now,'activity':'Edit peminjaman','description':'Jumlah $old menjadi $q; peminjam ${borrower.text}','by':given.text},
+            ]);
+            if(ctx.mounted)Navigator.pop(ctx);_msg('Peminjaman diperbarui.');
+          }catch(e){_msg('Gagal edit peminjaman: $e');}
+        },child:const Text('Simpan'))
+      ],
+    ));
+  }
+
+  Future<void> _deleteLoan(Map<String,dynamic> loan) async {
+    final ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Hapus peminjaman?'),
+      content:const Text('Catatan peminjaman dan pengembalian terkait akan ditandai batal. Riwayat tetap disimpan.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Hapus'))],
+    ));
+    if(ok!=true)return;
+    final id='${loan['id']}',now=dateNow();
+    final records=<Map<String,dynamic>>[
+      {'sheet':'LPG_Peminjaman',...loan,'voided':true,'voidedAt':now},
+      for(final m in rows('LPG_MutasiStok').where((x)=>'${x['id']}'==id || rows('LPG_PengembalianPinjam').any((ret)=>ret['loanId']==id && ret['id']==x['id'])))
+        {'sheet':'LPG_MutasiStok',...m,'voided':true,'voidedAt':now},
+      for(final r in rows('LPG_PengembalianPinjam').where((x)=>x['loanId']==id))
+        {'sheet':'LPG_PengembalianPinjam',...r,'voided':true,'voidedAt':now},
+      {'sheet':'LPG_Riwayat','id':'HAPUS-$id-$now','date':now,'activity':'Hapus peminjaman','description':'Peminjaman $id dibatalkan','by':'Aplikasi'},
+    ];
+    try{await _commit(records);_msg('Peminjaman dihapus dari daftar aktif.');}catch(e){_msg('Gagal hapus: $e');}
+  }
+
+  Future<void> _editDebtDialog(Map<String,dynamic> debt) async {
+    final customer=TextEditingController(text:'${debt['customer']}');
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Edit Data Kasbon'),
+      content:TextField(controller:customer,decoration:const InputDecoration(labelText:'Nama pelanggan')),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),
+        FilledButton(onPressed:()async{
+          if(customer.text.trim().isEmpty){_msg('Nama pelanggan wajib diisi.');return;}
+          try{await _commit([{'sheet':'LPG_Kasbon',...debt,'customer':customer.text.trim(),'editedAt':dateNow()}]);if(ctx.mounted)Navigator.pop(ctx);_msg('Data kasbon diperbarui.');}
+          catch(e){_msg('Gagal edit kasbon: $e');}
+        },child:const Text('Simpan'))
+      ],
+    ));
+  }
+
+  Future<void> _deleteDebt(Map<String,dynamic> debt) async {
+    final ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Hapus kasbon?'),
+      content:const Text('Kasbon akan ditandai batal. Riwayat pembayaran tetap dipertahankan.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(ctx,true),child:const Text('Hapus'))],
+    ));
+    if(ok!=true)return;
+    final now=dateNow(), id='${debt['id']}';
+    try{
+      await _commit([
+        {'sheet':'LPG_Kasbon',...debt,'voided':true,'voidedAt':now},
+        {'sheet':'LPG_Riwayat','id':'HAPUS-$id-$now','date':now,'activity':'Hapus kasbon','description':'Kasbon $id dibatalkan','by':'Aplikasi'},
+      ]);
+      _msg('Kasbon dibatalkan.');
+    }catch(e){_msg('Gagal hapus kasbon: $e');}
+  }
+
   Widget _salesPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.point_of_sale),label:const Text('Transaksi Penjualan LPG')),
     for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true)) Card(child:ListTile(
       title:Text('${r['customer']} • ${r['variant']}'),
       subtitle:Text('${r['qty']} x ${money.format(d(r['unitPrice']))} • ${r['payment']} • ${r['date']}'),
-      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);if(v=='void')_voidLpgRecord('LPG_Penjualan',r);},itemBuilder:(_)=>const [
+      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);if(v=='void')_voidLpgRecord('LPG_Penjualan',r);if(v=='edit')_editSaleDialog(r);},itemBuilder:(_)=>const [
+        PopupMenuItem(value:'edit',child:Text('Edit penjualan')),
         PopupMenuItem(value:'print',child:Text('Cetak struk Bluetooth')),
         PopupMenuItem(value:'wa',child:Text('Bagikan PDF')),
-        PopupMenuItem(value:'void',child:Text('Batalkan transaksi')),
+        PopupMenuItem(value:'void',child:Text('Hapus transaksi')),
       ],child:Text(money.format(d(r['total'])))),
     )),
   ]);
@@ -3450,9 +3610,11 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       subtitle:Text('Penjualan: ${r['saleId']} • ${r['status']}\nTotal ${money.format(d(r['total']))} • Dibayar ${money.format(d(r['paid']))}'),
       isThreeLine:true,
       trailing: PopupMenuButton<String>(
-        onSelected: (v) { if (v == 'bayar') _settleDebt(r); if (v == 'pdf') _shareDebtReceipt(r); },
+        onSelected: (v) { if (v == 'bayar') _settleDebt(r); if (v == 'pdf') _shareDebtReceipt(r); if (v == 'edit') _editDebtDialog(r); if (v == 'delete') _deleteDebt(r); },
         itemBuilder: (_) => [
           if (r['status'] != 'Lunas') const PopupMenuItem(value: 'bayar', child: Text('Bayar kasbon')),
+          const PopupMenuItem(value: 'edit', child: Text('Edit kasbon')),
+          const PopupMenuItem(value: 'delete', child: Text('Hapus kasbon')),
           const PopupMenuItem(value: 'pdf', child: Text('Cetak / bagikan nota PDF')),
         ],
         child: Padding(padding: const EdgeInsets.all(8), child: Text(r['status']=='Lunas' ? 'Lunas' : money.format(d(r['remaining'])))),
@@ -3528,8 +3690,16 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   Widget build(BuildContext context) {
     final pages=<Widget>[_salesPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_borrowPage(),_debtsPage(),_reportPage(),_historyPage()];
     return Scaffold(
-      appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
+      appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(tooltip:'Laporan harian/bulanan',onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.analytics_outlined)),IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
       body:loading?const Center(child:CircularProgressIndicator()):pages[tab],
+      floatingActionButton: tab==7 ? null : FloatingActionButton.extended(
+        heroTag: 'lpg_report_shortcut',
+        backgroundColor: green,
+        foregroundColor: Colors.white,
+        onPressed: () => setState(() => tab=7),
+        icon: const Icon(Icons.analytics_outlined),
+        label: const Text('Laporan'),
+      ),
       bottomNavigationBar:Container(color:Colors.white,height:72,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
         for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:112,padding:const EdgeInsets.symmetric(horizontal:8,vertical:10),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.swap_horiz,Icons.account_balance_wallet,Icons.analytics,Icons.history][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
       ]))),
