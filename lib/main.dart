@@ -2714,6 +2714,8 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     'Jumlah Tabung & Peminjaman', 'Kasbon', 'Laporan', 'Riwayat Transaksi'
   ];
   int tab = 0;
+  bool reportMonthly = false;
+  DateTime reportDate = DateTime.now();
   bool loading = false;
   Map<String, List<Map<String, dynamic>>> data = {};
   final Map<String, int> initialFull = {};
@@ -2780,6 +2782,39 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     await _load();
   }
 
+  Future<void> _voidLpgRecord(String sheet, Map<String,dynamic> record) async {
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Batalkan data LPG?'),
+      content: const Text('Data akan ditandai batal dan tidak lagi dihitung dalam laporan/stok. Riwayat tetap dipertahankan.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Tidak')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ya, batalkan')),
+      ],
+    ));
+    if (ok != true) return;
+    final id = '${record['id']}';
+    final now = dateNow();
+    final updates = <Map<String,dynamic>>[];
+    final original = Map<String,dynamic>.from(record)..['voided'] = true..['voidedAt'] = now;
+    updates.add({'sheet': sheet, ...original});
+    if (sheet == 'LPG_Penjualan' || sheet == 'LPG_Pembelian') {
+      for (final m in rows('LPG_MutasiStok').where((m) => '${m['id']}'.startsWith(id))) {
+        updates.add({'sheet':'LPG_MutasiStok', ...Map<String,dynamic>.from(m), 'voided':true, 'voidedAt':now});
+      }
+    }
+    if (sheet == 'LPG_Penjualan') {
+      for (final p in rows('LPG_Pembayaran').where((p) => p['saleId'] == id)) {
+        updates.add({'sheet':'LPG_Pembayaran', ...Map<String,dynamic>.from(p), 'voided':true, 'voidedAt':now});
+      }
+      for (final debt in rows('LPG_Kasbon').where((x) => x['saleId'] == id)) {
+        updates.add({'sheet':'LPG_Kasbon', ...Map<String,dynamic>.from(debt), 'voided':true, 'voidedAt':now});
+      }
+    }
+    updates.add({'sheet':'LPG_Riwayat','id':'BATAL-$id-$now','date':now,'activity':'Pembatalan data','description':'$sheet $id dibatalkan','by':'Aplikasi'});
+    try { await _commit(updates); _msg('Data dibatalkan dan stok/laporan disesuaikan.'); }
+    catch (e) { _msg('Gagal membatalkan data: $e'); }
+  }
+
   void _msg(String s) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
@@ -2788,6 +2823,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   Map<String, int> _stock(String variant) {
     int full = 0, empty = 0, quarantine = 0, borrowed = 0, inTransit = 0;
     for (final r in rows('LPG_MutasiStok')) {
+      if (r['voided'] == true) continue;
       if ((r['variant'] ?? '') != variant) continue;
       final type = r['type'] ?? '';
       final qty = n(r['qty']);
@@ -2812,7 +2848,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   }
 
   int _sum(String key) => rows(key).length;
-  List<Map<String, dynamic>> get customers => rows('LPG_Pelanggan');
+  List<Map<String, dynamic>> get customers => rows('LPG_Pelanggan').where((c)=>c['voided']!=true).toList();
   String _customerName(Map<String, dynamic> c) => '${c['name'] ?? ''}';
 
   Future<void> _saleDialog() async {
@@ -2843,15 +2879,15 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
           }),
           TextField(controller: buyerC, decoration: const InputDecoration(labelText: 'Nama pembeli (opsional)')),
           TextField(controller: nikC, decoration: const InputDecoration(labelText: 'NIK (opsional)')),
-          TextField(controller: qtyC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah tabung isi')),
-          TextField(controller: priceC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga per tabung')),
-          TextField(controller: emptyC, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tabung kosong diterima (wajib sama dengan jumlah jual)')),
+          TextField(controller: qtyC, keyboardType: TextInputType.number, onChanged: (_) => setD(() {}), decoration: const InputDecoration(labelText: 'Jumlah tabung isi')),
+          TextField(controller: priceC, keyboardType: TextInputType.number, onChanged: (_) => setD(() {}), decoration: const InputDecoration(labelText: 'Harga per tabung')),
+          TextField(controller: emptyC, keyboardType: TextInputType.number, onChanged: (_) => setD(() {}), decoration: const InputDecoration(labelText: 'Tabung kosong diterima (wajib sama dengan jumlah jual)')),
           Text('Total: ${money.format(total)}', style: const TextStyle(fontWeight: FontWeight.bold)),
           DropdownButtonFormField<String>(value: payment, decoration: const InputDecoration(labelText: 'Pembayaran'), items: ['Tunai','QRIS','Split Bill','Kasbon Penuh','Kasbon Sebagian'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(), onChanged:(v)=>setD(()=>payment=v!)),
-          if(payment=='Tunai' || payment=='Kasbon Sebagian') TextField(controller:paidC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Uang diterima')),
+          if(payment=='Tunai' || payment=='Kasbon Sebagian') TextField(controller:paidC,keyboardType:TextInputType.number,onChanged:(_) => setD(() {}),decoration:const InputDecoration(labelText:'Uang diterima')),
           if(payment=='Split Bill') ...[
-            TextField(controller:cashC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Bagian tunai')),
-            TextField(controller:qrisC,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Bagian QRIS')),
+            TextField(controller:cashC,keyboardType:TextInputType.number,onChanged:(_) => setD(() {}),decoration:const InputDecoration(labelText:'Bagian tunai')),
+            TextField(controller:qrisC,keyboardType:TextInputType.number,onChanged:(_) => setD(() {}),decoration:const InputDecoration(labelText:'Bagian QRIS')),
           ],
           if(payment=='QRIS' || (payment=='Split Bill' && d(qrisC.text)>0)) Padding(padding:const EdgeInsets.all(8),child:GestureDetector(onTap:()=>showDialog(context:ctx,builder:(c)=>Dialog(child:InteractiveViewer(child:Image.asset('assets/images/qris.png')))),child:Image.asset('assets/images/qris.png',height:130,errorBuilder:(_,__,___)=>const Text('QRIS: assets/images/qris.png')))),
           if(payment.startsWith('Kasbon')) Text('Sisa kasbon: ${money.format(remaining)}'),
@@ -2920,9 +2956,9 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     )));
   }
 
-  Future<void> _customerDialog() async {
-    final name=TextEditingController(), owner=TextEditingController(), address=TextEditingController(), wa=TextEditingController(), p3=TextEditingController(text:'16000'), p55=TextEditingController(text:'0'), p12=TextEditingController(text:'0');
-    await showDialog(context:context,builder:(ctx)=>AlertDialog(title:const Text('Tambah Pelanggan LPG'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+  Future<void> _customerDialog([Map<String,dynamic>? existing]) async {
+    final name=TextEditingController(text:'${existing?['name'] ?? ''}'), owner=TextEditingController(text:'${existing?['owner'] ?? ''}'), address=TextEditingController(text:'${existing?['address'] ?? ''}'), wa=TextEditingController(text:'${existing?['wa'] ?? ''}'), p3=TextEditingController(text:'${existing?['price_3'] ?? 16000}'), p55=TextEditingController(text:'${existing?['price_55'] ?? 0}'), p12=TextEditingController(text:'${existing?['price_12'] ?? 0}');
+    await showDialog(context:context,builder:(ctx)=>AlertDialog(title:Text(existing==null?'Tambah Pelanggan LPG':'Edit Pelanggan LPG'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
       TextField(controller:name,decoration:const InputDecoration(labelText:'Nama warung/pelanggan')),
       TextField(controller:owner,decoration:const InputDecoration(labelText:'Nama pemilik')),
       TextField(controller:address,decoration:const InputDecoration(labelText:'Alamat/area')),
@@ -2932,7 +2968,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       TextField(controller:p12,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Harga LPG 12 kg')),
     ])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
       if(name.text.trim().isEmpty){_msg('Nama pelanggan wajib diisi.');return;}
-      final id='C-${DateTime.now().millisecondsSinceEpoch}';
+      final id='${existing?['id'] ?? 'C-${DateTime.now().millisecondsSinceEpoch}'}';
       try{await _commit([{'sheet':'LPG_Pelanggan','id':id,'date':dateNow(),'name':name.text,'owner':owner.text,'address':address.text,'wa':wa.text,'price_3':d(p3.text),'price_55':d(p55.text),'price_12':d(p12.text),'active':true}]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal: $e');}
     },child:const Text('Simpan'))]));
   }
@@ -3243,7 +3279,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Widget _customersPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_customerDialog,icon:const Icon(Icons.person_add),label:const Text('Tambah Pelanggan')),
-    for(final c in customers) Card(child:ListTile(title:Text(_customerName(c)),subtitle:Text('${c['owner']??''} • ${c['address']??''}\nWA: ${c['wa']??'-'}'),isThreeLine:true,trailing:Text('3kg ${money.format(d(c['price_3']))}'))),
+    for(final c in customers) Card(child:ListTile(title:Text(_customerName(c)),subtitle:Text('${c['owner']??''} • ${c['address']??''}\nWA: ${c['wa']??'-'}'),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='edit')_customerDialog(c);if(v=='delete')_voidLpgRecord('LPG_Pelanggan',c);},itemBuilder:(_)=>const [PopupMenuItem(value:'edit',child:Text('Edit')),PopupMenuItem(value:'delete',child:Text('Hapus'))],child:Text('3kg ${money.format(d(c['price_3']))}'))),
   ]);
 
   Widget _borrowPage()=>ListView(padding:const EdgeInsets.all(12),children:[
@@ -3259,16 +3295,35 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
 
   Future<void> _shareReceipt(Map<String,dynamic> r) async {
-    final textReceipt = 'STRUK PANGKALAN LPG\n'
-      'No: ${r['id']}\nTanggal: ${r['date']}\nPelanggan: ${r['customer']}\n'
-      'Barang: ${r['variant']} x ${r['qty']}\n'
-      'Harga: ${money.format(d(r['unitPrice']))}\nTotal: ${money.format(d(r['total']))}\n'
-      'Pembayaran: ${r['payment']}\nDibayar: ${money.format(d(r['paid']))}\n'
-      'Sisa kasbon: ${money.format(d(r['remaining']))}\n'
-      'Tabung kosong diterima: ${r['emptyReceived']}\nTerima kasih.';
-    final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(textReceipt)}');
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      _msg('WhatsApp tidak dapat dibuka pada perangkat ini.');
+    try {
+      final doc = pw.Document();
+      doc.addPage(pw.Page(
+        pageFormat: PdfPageFormat.roll80,
+        build: (ctx) => pw.Padding(
+          padding: const pw.EdgeInsets.all(8),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Center(child: pw.Text('STRUK PANGKALAN LPG', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold))),
+            pw.Divider(),
+            pw.Text('No: ${r['id']}'),
+            pw.Text('Tanggal: ${r['date']}'),
+            pw.Text('Pelanggan: ${r['customer']}'),
+            pw.SizedBox(height: 8),
+            pw.Text('${r['variant']}  x ${r['qty']}'),
+            pw.Text('Harga: ${money.format(d(r['unitPrice']))}'),
+            pw.Divider(),
+            pw.Text('TOTAL: ${money.format(d(r['total']))}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.Text('Pembayaran: ${r['payment']}'),
+            pw.Text('Dibayar: ${money.format(d(r['paid']))}'),
+            pw.Text('Sisa kasbon: ${money.format(d(r['remaining']))}'),
+            pw.Text('Tabung kosong diterima: ${r['emptyReceived']}'),
+            pw.Divider(),
+            pw.Center(child: pw.Text('Terima kasih')),
+          ]),
+        ),
+      ));
+      await Printing.sharePdf(bytes: await doc.save(), filename: 'Struk_LPG_${r['id']}.pdf');
+    } catch (e) {
+      _msg('Gagal membuat/membagikan PDF: $e');
     }
   }
 
@@ -3289,6 +3344,37 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       await PrintBluetoothThermal.disconnect;
       _msg('Struk LPG dikirim ke printer.');
     } catch (e) { _msg('Gagal mencetak struk: $e'); }
+  }
+
+  Future<void> _shareDebtReceipt(Map<String,dynamic> debt) async {
+    try {
+      final doc = pw.Document();
+      doc.addPage(pw.Page(
+        pageFormat: PdfPageFormat.a5,
+        build: (ctx) => pw.Padding(
+          padding: const pw.EdgeInsets.all(20),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Center(child: pw.Text('NOTA PENAGIHAN KASBON LPG', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
+            pw.Divider(),
+            pw.Text('No. Kasbon: ${debt['id']}'),
+            pw.Text('Tanggal: ${debt['date']}'),
+            pw.Text('Pelanggan: ${debt['customer']}'),
+            pw.Text('No. Penjualan: ${debt['saleId']}'),
+            pw.SizedBox(height: 18),
+            pw.Text('Total tagihan: ${money.format(d(debt['total']))}'),
+            pw.Text('Sudah dibayar: ${money.format(d(debt['paid']))}'),
+            pw.Text('Sisa harus dibayar: ${money.format(d(debt['remaining']))}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 14)),
+            pw.SizedBox(height: 24),
+            pw.Text('Mohon melakukan pembayaran. Terima kasih.'),
+            pw.Spacer(),
+            pw.Align(alignment: pw.Alignment.centerRight, child: pw.Text('Pangkalan LPG')),
+          ]),
+        ),
+      ));
+      await Printing.sharePdf(bytes: await doc.save(), filename: 'Nota_Kasbon_LPG_${debt['id']}.pdf');
+    } catch (e) {
+      _msg('Gagal membuat nota PDF: $e');
+    }
   }
 
   Future<void> _settleDebt(Map<String,dynamic> debt) async {
@@ -3322,40 +3408,100 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Widget _salesPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.point_of_sale),label:const Text('Transaksi Penjualan LPG')),
-    for(final r in rows('LPG_Penjualan')) Card(child:ListTile(
+    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true)) Card(child:ListTile(
       title:Text('${r['customer']} • ${r['variant']}'),
       subtitle:Text('${r['qty']} x ${money.format(d(r['unitPrice']))} • ${r['payment']} • ${r['date']}'),
-      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);},itemBuilder:(_)=>const [
+      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);if(v=='void')_voidLpgRecord('LPG_Penjualan',r);},itemBuilder:(_)=>const [
         PopupMenuItem(value:'print',child:Text('Cetak struk Bluetooth')),
-        PopupMenuItem(value:'wa',child:Text('Bagikan WhatsApp')),
+        PopupMenuItem(value:'wa',child:Text('Bagikan PDF')),
+        PopupMenuItem(value:'void',child:Text('Batalkan transaksi')),
       ],child:Text(money.format(d(r['total'])))),
     )),
   ]);
 
   Widget _purchasePage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_purchaseDialog,icon:const Icon(Icons.add_shopping_cart),label:const Text('Catat Pembelian dari Agen')),
-    for(final r in rows('LPG_Pembelian')) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${r['date']}'),trailing:Text(money.format(d(r['total']))))),
+    for(final r in rows('LPG_Pembelian').where((x)=>x['voided']!=true)) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${r['date']}'),trailing:PopupMenuButton<String>(onSelected:(v){if(v=='void')_voidLpgRecord('LPG_Pembelian',r);},itemBuilder:(_)=>const [PopupMenuItem(value:'void',child:Text('Batalkan pembelian'))],child:Text(money.format(d(r['total'])))))),
   ]);
 
   Widget _debtsPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    for(final r in rows('LPG_Kasbon')) Card(child:ListTile(
+    for(final r in rows('LPG_Kasbon').where((x)=>x['voided']!=true)) Card(child:ListTile(
       title:Text('${r['customer']}'),
       subtitle:Text('Penjualan: ${r['saleId']} • ${r['status']}\nTotal ${money.format(d(r['total']))} • Dibayar ${money.format(d(r['paid']))}'),
       isThreeLine:true,
-      trailing: r['status']=='Lunas' ? const Icon(Icons.check_circle,color:Colors.green) : TextButton(onPressed:()=>_settleDebt(r),child:Text('Bayar\n${money.format(d(r['remaining']))}')),
+      trailing: PopupMenuButton<String>(
+        onSelected: (v) { if (v == 'bayar') _settleDebt(r); if (v == 'pdf') _shareDebtReceipt(r); },
+        itemBuilder: (_) => [
+          if (r['status'] != 'Lunas') const PopupMenuItem(value: 'bayar', child: Text('Bayar kasbon')),
+          const PopupMenuItem(value: 'pdf', child: Text('Cetak / bagikan nota PDF')),
+        ],
+        child: Padding(padding: const EdgeInsets.all(8), child: Text(r['status']=='Lunas' ? 'Lunas' : money.format(d(r['remaining'])))),
+      ),
     )),
   ]);
 
-  Widget _reportPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    for(final v in lpgVariants) Builder(builder:(_){final s=_stock(v);final total=s['full']!+s['empty']!+s['quarantine']!+s['borrowed']!+s['inTransit']!;return _card('$v • Isi / kosong / dipinjam / karantina / retur agen', '${s['full']} / ${s['empty']} / ${s['borrowed']} / ${s['quarantine']} / ${s['inTransit']} • Total $total tabung',Icons.propane_tank);}),
-    _card('Total penjualan tercatat','${money.format(rows('LPG_Penjualan').fold<double>(0,(a,r)=>a+d(r['total'])))}',Icons.point_of_sale),
-    _card('Total pembelian','${money.format(rows('LPG_Pembelian').fold<double>(0,(a,r)=>a+d(r['total'])))}',Icons.shopping_cart),
-    _card('Peminjaman belum lunas', '${rows('LPG_Peminjaman').where((r)=>r['status']!='Sudah dikembalikan').length}', Icons.assignment_return),
-  ]);
+  bool _inReportPeriod(Map<String,dynamic> r) {
+    DateTime? dt = DateTime.tryParse('${r['date'] ?? ''}');
+    if (dt == null) return false;
+    if (reportMonthly) {
+      return dt.year == reportDate.year && dt.month == reportDate.month;
+    }
+    return dt.year == reportDate.year && dt.month == reportDate.month && dt.day == reportDate.day;
+  }
+
+  Widget _reportPage() {
+    final sales = rows('LPG_Penjualan').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final purchases = rows('LPG_Pembelian').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final paidRows = rows('LPG_Pembayaran').where(_inReportPeriod).where((r) => r['voided'] != true).toList();
+    final totalSales = sales.fold<double>(0, (a, r) => a + d(r['total']));
+    final totalPurchases = purchases.fold<double>(0, (a, r) => a + d(r['total']));
+    final cash = paidRows.where((r) => r['method'] == 'Tunai').fold<double>(0, (a,r)=>a+d(r['amount']));
+    final qris = paidRows.where((r) => r['method'] == 'QRIS').fold<double>(0, (a,r)=>a+d(r['amount']));
+    return ListView(padding: const EdgeInsets.all(12), children: [
+      const Text('Laporan LPG', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      SegmentedButton<bool>(
+        segments: const [
+          ButtonSegment(value: false, label: Text('Harian'), icon: Icon(Icons.today)),
+          ButtonSegment(value: true, label: Text('Bulanan'), icon: Icon(Icons.calendar_month)),
+        ],
+        selected: {reportMonthly},
+        onSelectionChanged: (v) => setState(() => reportMonthly = v.first),
+      ),
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(reportMonthly ? DateFormat('MMMM yyyy', 'id_ID').format(reportDate) : DateFormat('dd MMMM yyyy', 'id_ID').format(reportDate)),
+        trailing: IconButton(icon: const Icon(Icons.date_range), onPressed: () async {
+          if (reportMonthly) {
+            final picked = await showDatePicker(context: context, initialDate: reportDate, firstDate: DateTime(2020), lastDate: DateTime(2100), helpText: 'Pilih tanggal dalam bulan laporan');
+            if (picked != null) setState(() => reportDate = picked);
+          } else {
+            final picked = await showDatePicker(context: context, initialDate: reportDate, firstDate: DateTime(2020), lastDate: DateTime(2100));
+            if (picked != null) setState(() => reportDate = picked);
+          }
+        }),
+      ),
+      _card('Total penjualan', money.format(totalSales), Icons.point_of_sale),
+      _card('Total pembelian', money.format(totalPurchases), Icons.shopping_cart),
+      _card('Penerimaan tunai', money.format(cash), Icons.payments),
+      _card('Penerimaan QRIS', money.format(qris), Icons.qr_code),
+      _card('Sisa kasbon aktif', money.format(rows('LPG_Kasbon').where((r)=>r['status']!='Lunas' && r['voided']!=true).fold<double>(0,(a,r)=>a+d(r['remaining']))), Icons.account_balance_wallet),
+      _card('Jumlah transaksi penjualan', '${sales.length}', Icons.receipt_long),
+      _card('Jumlah pembelian', '${purchases.length}', Icons.inventory),
+      const Divider(),
+      const Text('Posisi stok saat ini', style: TextStyle(fontWeight: FontWeight.bold)),
+      for (final v in lpgVariants) Builder(builder: (_) {
+        final s = _stock(v);
+        final total = s['full']! + s['empty']! + s['quarantine']! + s['borrowed']! + s['inTransit']!;
+        return _card('$v • Isi / kosong / dipinjam / karantina / retur agen',
+          '${s['full']} / ${s['empty']} / ${s['borrowed']} / ${s['quarantine']} / ${s['inTransit']} • Total $total tabung', Icons.propane_tank);
+      }),
+    ]);
+  }
 
   Widget _historyPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''} • ${r['date']??''}')),
-    for(final r in rows('LPG_Penjualan').reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${r['date']}')),
+    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${r['date']}')),
   ]);
 
   @override
