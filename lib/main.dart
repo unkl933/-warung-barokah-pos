@@ -4063,15 +4063,118 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     )));
   }
 
-  Future<void> _distributionExpenseDialog(Map<String,dynamic> dist) async {
-    String category='BBM';
-    final amount=TextEditingController(),desc=TextEditingController(),paidBy=TextEditingController(text:'Pemilik');
-    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Biaya Distribusi'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      DropdownButtonFormField<String>(value:category,decoration:const InputDecoration(labelText:'Kategori biaya'),items:const ['BBM','Rokok','Kopi / Makanan','Parkir / Lainnya','Biaya Lainnya'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)setD(()=>category=v);}),
-      TextField(controller:amount,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'Jumlah rupiah')),
-      TextField(controller:desc,decoration:const InputDecoration(labelText:'Keterangan')),
-      TextField(controller:paidBy,decoration:const InputDecoration(labelText:'Dibayar oleh')),
-    ]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final value=d(amount.text);if(value<=0){_msg('Masukkan jumlah biaya.');return;}final id='DST-BIAYA-${DateTime.now().millisecondsSinceEpoch}';try{await _commit([{'sheet':'LPG_BiayaDistribusi','id':id,'distributionId':dist['id'],'date':dateNow(),'category':category,'amount':value,'description':desc.text.trim(),'paidBy':paidBy.text.trim()},{'sheet':'LPG_Riwayat','id':'$id-LOG','date':dateNow(),'activity':'Biaya distribusi','description':'${dist['id']} • $category • ${money.format(value)}','by':paidBy.text.trim()}]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal menyimpan biaya: $e');}},child:const Text('Simpan'))]));
+  Future<void> _distributionExpenseDialog(Map<String, dynamic> dist) async {
+    String category = 'BBM';
+    final amount = TextEditingController();
+    final desc = TextEditingController();
+    final paidBy = TextEditingController(text: 'Pemilik');
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setD) {
+            return AlertDialog(
+              title: const Text('Biaya Distribusi'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: category,
+                      decoration: const InputDecoration(
+                        labelText: 'Kategori biaya',
+                      ),
+                      items: const [
+                        'BBM',
+                        'Rokok',
+                        'Kopi / Makanan',
+                        'Parkir / Lainnya',
+                        'Biaya Lainnya',
+                      ].map((x) => DropdownMenuItem(
+                            value: x,
+                            child: Text(x),
+                          )).toList(),
+                      onChanged: (v) {
+                        if (v != null) setD(() => category = v);
+                      },
+                    ),
+                    TextField(
+                      controller: amount,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Jumlah rupiah',
+                      ),
+                    ),
+                    TextField(
+                      controller: desc,
+                      decoration: const InputDecoration(
+                        labelText: 'Keterangan',
+                      ),
+                    ),
+                    TextField(
+                      controller: paidBy,
+                      decoration: const InputDecoration(
+                        labelText: 'Dibayar oleh',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Batal'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final value = d(amount.text);
+                    if (value <= 0) {
+                      _msg('Masukkan jumlah biaya.');
+                      return;
+                    }
+
+                    final id =
+                        'DST-BIAYA-${DateTime.now().millisecondsSinceEpoch}';
+                    try {
+                      await _commit([
+                        {
+                          'sheet': 'LPG_BiayaDistribusi',
+                          'id': id,
+                          'distributionId': dist['id'],
+                          'date': dateNow(),
+                          'category': category,
+                          'amount': value,
+                          'description': desc.text.trim(),
+                          'paidBy': paidBy.text.trim(),
+                        },
+                        {
+                          'sheet': 'LPG_Riwayat',
+                          'id': '$id-LOG',
+                          'date': dateNow(),
+                          'activity': 'Biaya distribusi',
+                          'description':
+                              '${dist['id']} • $category • ${money.format(value)}',
+                          'by': paidBy.text.trim(),
+                        },
+                      ]);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    } catch (e) {
+                      _msg('Gagal menyimpan biaya: $e');
+                    }
+                  },
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    amount.dispose();
+    desc.dispose();
+    paidBy.dispose();
   }
 
   Future<void> _closeDistributionDialog(Map<String,dynamic> dist) async {
