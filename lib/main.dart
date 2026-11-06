@@ -3279,7 +3279,27 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Widget _customersPage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_customerDialog,icon:const Icon(Icons.person_add),label:const Text('Tambah Pelanggan')),
-    for(final c in customers) Card(child:ListTile(title:Text(_customerName(c)),subtitle:Text('${c['owner']??''} • ${c['address']??''}\nWA: ${c['wa']??'-'}'),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='edit')_customerDialog(c);if(v=='delete')_voidLpgRecord('LPG_Pelanggan',c);},itemBuilder:(_)=>const [PopupMenuItem(value:'edit',child:Text('Edit')),PopupMenuItem(value:'delete',child:Text('Hapus'))],child:Text('3kg ${money.format(d(c['price_3']))}'))),
+    for (final c in customers)
+      Card(
+        child: ListTile(
+          title: Text(_customerName(c)),
+          subtitle: Text(
+            '${c['owner'] ?? ''} • ${c['address'] ?? ''}\\nWA: ${c['wa'] ?? '-'}',
+          ),
+          isThreeLine: true,
+          trailing: PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'edit') _customerDialog(c);
+              if (v == 'delete') _voidLpgRecord('LPG_Pelanggan', c);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'edit', child: Text('Edit')),
+              PopupMenuItem(value: 'delete', child: Text('Hapus')),
+            ],
+            child: Text('3kg ${money.format(d(c['price_3']))}'),
+          ),
+        ),
+      ),
   ]);
 
   Widget _borrowPage()=>ListView(padding:const EdgeInsets.all(12),children:[
