@@ -2710,8 +2710,8 @@ class LpgModuleScreen extends StatefulWidget {
 class _LpgModuleScreenState extends State<LpgModuleScreen> {
   final Color green = const Color(0xFF10B981);
   final List<String> tabs = const [
-    'Penjualan', 'Pembelian', 'Pelanggan', 'Stok', 'Retur Gas',
-    'Jumlah Tabung & Peminjaman', 'Kasbon', 'Laporan', 'Riwayat Transaksi'
+    'Penjualan', 'Tabung di Luar', 'Pembelian', 'Pelanggan', 'Stok',
+    'Retur Gas', 'Kasbon', 'Laporan', 'Riwayat Transaksi'
   ];
   int tab = 0;
   bool reportMonthly = false;
@@ -2727,6 +2727,43 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   int n(dynamic v) => (v is num) ? v.toInt() : int.tryParse('$v') ?? 0;
   double d(dynamic v) => (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0;
   String dateNow() => DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now());
+
+  DateTime? _parseLpgDate(dynamic value) {
+    if (value == null || value.toString().trim().isEmpty) return null;
+    try { return DateTime.parse(value.toString()).toLocal(); } catch (_) { return null; }
+  }
+
+  String _formatLpgDate(dynamic value) {
+    final dt = _parseLpgDate(value);
+    return dt == null ? '-' : DateFormat('dd-MM-yyyy HH:mm').format(dt);
+  }
+
+  List<Map<String, dynamic>> _saleItems(Map<String, dynamic> sale) {
+    try {
+      final raw = jsonDecode('${sale['items'] ?? ''}');
+      if (raw is List) return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {}
+    return [
+      {'variant': sale['variant'] ?? '-', 'qty': sale['qty'] ?? 0,
+       'unitPrice': sale['unitPrice'] ?? 0,
+       'total': d(sale['total'])},
+    ];
+  }
+
+  Map<String, dynamic>? _saleDebt(Map<String, dynamic> sale) {
+    final found = rows('LPG_Kasbon').where((x) =>
+      x['saleId'] == sale['id'] && x['voided'] != true && d(x['remaining']) > 0).toList();
+    if (found.isEmpty) return null;
+    return found.first;
+  }
+
+  String _salePaymentLabel(Map<String, dynamic> sale, Map<String, dynamic>? debt) {
+    if (debt != null) return 'Kasbon / belum lunas';
+    final payment = '${sale['payment'] ?? '-'}';
+    if (payment == 'Kasbon Sebagian' || payment == 'Kasbon Penuh') return 'Kasbon (lunas)';
+    if (payment == 'Split Bill') return 'Tunai + QRIS';
+    return payment;
+  }
 
   @override
   void initState() {
@@ -2854,6 +2891,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
 
   Future<void> _saleDialog() async {
     String customer = 'Umum / Walk-in', payment = 'Tunai';
+    bool includeOldDebt = false;
     final selected = <String, bool>{for (final v in lpgVariants) v: v == lpgVariants.first};
     final qtyCtrls = <String, TextEditingController>{for (final v in lpgVariants) v: TextEditingController(text: '1')};
     final priceCtrls = <String, TextEditingController>{for (final v in lpgVariants) v: TextEditingController(text: v == lpgVariants.first ? '17000' : '0')};
@@ -2864,8 +2902,12 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       final items=<Map<String,dynamic>>[];
       for(final v in lpgVariants){if(selected[v]==true){final q=n(qtyCtrls[v]!.text), pr=d(priceCtrls[v]!.text);items.add({'variant':v,'qty':q,'unitPrice':pr,'emptyReceived':n(emptyCtrls[v]!.text),'total':q*pr});}}
       final total=items.fold<double>(0,(a,x)=>a+d(x['total']));
-      final paid=payment=='Kasbon Penuh'?0:payment=='QRIS'?total:payment=='Split Bill'?d(cashC.text)+d(qrisC.text):d(paidC.text);
-      final remaining=(total-paid).clamp(0,total);
+      final oldDebts = rows('LPG_Kasbon').where((x)=>x['voided']!=true && x['status']!='Lunas' && x['customer']==customer && d(x['remaining'])>0).toList();
+      final oldDebtTotal = oldDebts.fold<double>(0,(a,x)=>a+d(x['remaining']));
+      final includedDebt = includeOldDebt ? oldDebtTotal : 0.0;
+      final invoiceTotal = total + includedDebt;
+      final paid=payment=='Kasbon Penuh'?0:payment=='QRIS'?invoiceTotal:payment=='Split Bill'?d(cashC.text)+d(qrisC.text):d(paidC.text);
+      final remaining=(invoiceTotal-paid).clamp(0,invoiceTotal);
       return AlertDialog(
         title:const Text('Penjualan LPG'),
         content:SizedBox(width:480,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
@@ -2882,7 +2924,11 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
               Align(alignment:Alignment.centerRight,child:Text('Subtotal: ${money.format(n(qtyCtrls[v]!.text)*d(priceCtrls[v]!.text))}',style:const TextStyle(fontWeight:FontWeight.w600))),
             ]
           ]))),
-          const Divider(),Text('TOTAL: ${money.format(total)}',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+          const Divider(),
+          if(oldDebtTotal>0) CheckboxListTile(dense:true,contentPadding:EdgeInsets.zero,value:includeOldDebt,title:Text('Sertakan tunggakan lama (${money.format(oldDebtTotal)})'),subtitle:const Text('Total bayar = pembelian baru + tunggakan lama'),onChanged:(v)=>setD(()=>includeOldDebt=v??false)),
+          if(includeOldDebt) Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[const Text('Pembelian baru'),Text(money.format(total))]),
+          if(includeOldDebt) Row(mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[const Text('Tunggakan lama'),Text(money.format(oldDebtTotal))]),
+          const Divider(),Text('TOTAL BAYAR: ${money.format(invoiceTotal)}',style:const TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
           DropdownButtonFormField<String>(value:payment,decoration:const InputDecoration(labelText:'Pembayaran'),items:['Tunai','QRIS','Split Bill','Kasbon Penuh','Kasbon Sebagian'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setD(()=>payment=v!)),
           if(payment=='Tunai'||payment=='Kasbon Sebagian')TextField(controller:paidC,keyboardType:TextInputType.number,onChanged:(_)=>setD((){}),decoration:InputDecoration(labelText:payment=='Tunai'?'Uang diterima':'Uang dibayar / DP')),
           if(payment=='Split Bill')...[
@@ -2896,24 +2942,44 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{
           if(items.isEmpty){_msg('Pilih minimal satu jenis tabung.');return;}
           for(final item in items){final v='${item['variant']}',q=n(item['qty']),empty=n(item['emptyReceived']);if(q<=0||empty!=q){_msg('Tabung kosong yang diterima untuk $v wajib sama dengan jumlah jual.');return;}if(_stock(v)['full']!<q){_msg('Stok $v tidak mencukupi.');return;}if(d(item['unitPrice'])<=0){_msg('Harga $v harus lebih dari nol.');return;}}
-          if(payment=='Split Bill'&&(d(cashC.text)+d(qrisC.text)-total).abs()>0.5){_msg('Tunai + QRIS harus sama dengan total.');return;}
-          if((payment=='Tunai'||payment=='Kasbon Sebagian')&&d(paidC.text)>total){_msg('Pembayaran tidak boleh melebihi total.');return;}
-          if(payment=='Tunai'&&d(paidC.text)<total){_msg('Pembayaran tunai kurang.');return;}
-          if(payment=='Kasbon Sebagian'&&(d(paidC.text)<=0||d(paidC.text)>=total)){_msg('Isi pembayaran sebagian yang valid.');return;}
+          if(payment=='Split Bill'&&(d(cashC.text)+d(qrisC.text)-invoiceTotal).abs()>0.5){_msg('Tunai + QRIS harus sama dengan total.');return;}
+          if((payment=='Tunai'||payment=='Kasbon Sebagian')&&d(paidC.text)>invoiceTotal){_msg('Pembayaran tidak boleh melebihi total.');return;}
+          if(payment=='Tunai'&&d(paidC.text)<invoiceTotal){_msg('Pembayaran tunai kurang.');return;}
+          if(payment=='Kasbon Sebagian'&&(d(paidC.text)<=0||d(paidC.text)>=invoiceTotal)){_msg('Isi pembayaran sebagian yang valid.');return;}
           final id='LPG-${DateTime.now().millisecondsSinceEpoch}',now=dateNow();
-          final paidNow=payment=='Tunai'||payment=='QRIS'||payment=='Split Bill'?total:payment=='Kasbon Penuh'?0:d(paidC.text);
+          final paidNow=payment=='Tunai'||payment=='QRIS'||payment=='Split Bill'?invoiceTotal:payment=='Kasbon Penuh'?0:d(paidC.text);
+          var cashLeft = payment=='Split Bill' ? d(cashC.text) : (payment=='Tunai'||payment=='Kasbon Sebagian' ? paidNow : 0.0);
+          var qrisLeft = payment=='Split Bill' ? d(qrisC.text) : (payment=='QRIS' ? paidNow : 0.0);
+          var oldDebtPaid = 0.0;
+          final oldDebtUpdates = <Map<String,dynamic>>[];
+          if(includeOldDebt) {
+            for(final oldDebt in oldDebts) {
+              final due=d(oldDebt['remaining']);
+              final fromCash=cashLeft.clamp(0.0,due).toDouble(); cashLeft-=fromCash;
+              final fromQris=qrisLeft.clamp(0.0,due-fromCash).toDouble(); qrisLeft-=fromQris;
+              final alloc=fromCash+fromQris;
+              if(alloc>0) {
+                oldDebtPaid+=alloc;
+                final newRemain=(due-alloc).clamp(0.0,due);
+                if(fromCash>0) oldDebtUpdates.add({'sheet':'LPG_Pembayaran','id':'$id-OLD-CASH-${oldDebt['id']}','date':now,'debtId':oldDebt['id'],'customer':customer,'amount':fromCash,'method':'Tunai','staff':staffC.text});
+                if(fromQris>0) oldDebtUpdates.add({'sheet':'LPG_Pembayaran','id':'$id-OLD-QRIS-${oldDebt['id']}','date':now,'debtId':oldDebt['id'],'customer':customer,'amount':fromQris,'method':'QRIS','staff':staffC.text});
+                oldDebtUpdates.add({'sheet':'LPG_Kasbon','id':oldDebt['id'],'date':oldDebt['date'],'saleId':oldDebt['saleId'],'customer':oldDebt['customer'],'total':oldDebt['total'],'paid':d(oldDebt['paid'])+alloc,'remaining':newRemain,'status':newRemain<=0?'Lunas':'Belum Lunas'});
+              }
+            }
+          }
+          final paidForNewSale=(paidNow-oldDebtPaid).clamp(0.0,total);
           final records=<Map<String,dynamic>>[
-            {'sheet':'LPG_Penjualan','id':id,'date':now,'variant':items.map((x)=>x['variant']).join(', '),'items':jsonEncode(items),'customer':customer,'buyer':buyerC.text,'nik':nikC.text,'qty':items.fold<int>(0,(a,x)=>a+n(x['qty'])),'unitPrice':0,'total':total,'payment':payment,'paid':paidNow,'remaining':total-paidNow,'staff':staffC.text,'emptyReceived':items.fold<int>(0,(a,x)=>a+n(x['emptyReceived']))},
+            {'sheet':'LPG_Penjualan','id':id,'date':now,'variant':items.map((x)=>x['variant']).join(', '),'items':jsonEncode(items),'customer':customer,'buyer':buyerC.text,'nik':nikC.text,'qty':items.fold<int>(0,(a,x)=>a+n(x['qty'])),'unitPrice':0,'total':total,'payment':payment,'paid':paidForNewSale,'remaining':total-paidForNewSale,'staff':staffC.text,'emptyReceived':items.fold<int>(0,(a,x)=>a+n(x['emptyReceived']))},
             {'sheet':'LPG_Riwayat','id':id,'date':now,'activity':'Penjualan LPG','description':'${items.map((x)=>'${x['variant']} ${x['qty']} tabung').join(', ')} kepada $customer; total ${money.format(total)}','by':staffC.text},
           ];
+          records.addAll(oldDebtUpdates);
           for(final item in items){final v='${item['variant']}',q=n(item['qty']);records.addAll([
             {'sheet':'LPG_MutasiStok','id':'$id-${lpgVariants.indexOf(v)}-FULL','date':now,'variant':v,'type':'SALE_FULL','qty':q,'note':'Penjualan $id'},
             {'sheet':'LPG_MutasiStok','id':'$id-${lpgVariants.indexOf(v)}-EMPTY','date':now,'variant':v,'type':'SALE_EMPTY_IN','qty':q,'note':'Tabung kosong diterima dari $id'},
           ]);}
-          if(payment=='Tunai'||payment=='QRIS')records.add({'sheet':'LPG_Pembayaran','id':'$id-PAY','date':now,'saleId':id,'customer':customer,'amount':total,'method':payment,'staff':staffC.text});
-          if(payment=='Split Bill'){if(d(cashC.text)>0)records.add({'sheet':'LPG_Pembayaran','id':'$id-CASH','date':now,'saleId':id,'customer':customer,'amount':d(cashC.text),'method':'Tunai','staff':staffC.text});if(d(qrisC.text)>0)records.add({'sheet':'LPG_Pembayaran','id':'$id-QRIS','date':now,'saleId':id,'customer':customer,'amount':d(qrisC.text),'method':'QRIS','staff':staffC.text});}
-          if(payment=='Kasbon Sebagian'&&paidNow>0)records.add({'sheet':'LPG_Pembayaran','id':'$id-PART','date':now,'saleId':id,'customer':customer,'amount':paidNow,'method':'Tunai','staff':staffC.text});
-          if(total-paidNow>0)records.add({'sheet':'LPG_Kasbon','id':'$id-DEBT','date':now,'saleId':id,'customer':customer,'total':total,'paid':paidNow,'remaining':total-paidNow,'status':'Belum Lunas'});
+          if(paidForNewSale>0 && payment!='Split Bill')records.add({'sheet':'LPG_Pembayaran','id':'$id-PAY','date':now,'saleId':id,'customer':customer,'amount':paidForNewSale,'method':payment=='Kasbon Sebagian'?'Tunai':payment,'staff':staffC.text});
+          if(payment=='Split Bill'){final cashForSale=cashLeft.clamp(0.0,paidForNewSale);final qrisForSale=qrisLeft.clamp(0.0,paidForNewSale-cashForSale);if(cashForSale>0)records.add({'sheet':'LPG_Pembayaran','id':'$id-CASH','date':now,'saleId':id,'customer':customer,'amount':cashForSale,'method':'Tunai','staff':staffC.text});if(qrisForSale>0)records.add({'sheet':'LPG_Pembayaran','id':'$id-QRIS','date':now,'saleId':id,'customer':customer,'amount':qrisForSale,'method':'QRIS','staff':staffC.text});}
+                    if(total-paidForNewSale>0)records.add({'sheet':'LPG_Kasbon','id':'$id-DEBT','date':now,'saleId':id,'customer':customer,'total':total,'paid':paidForNewSale,'remaining':total-paidForNewSale,'status':'Belum Lunas'});
           try{await _commit(records);if(ctx.mounted)Navigator.pop(ctx);_msg('Penjualan LPG tersimpan.');}catch(e){_msg('Gagal menyimpan: $e');}
         },child:const Text('Simpan Penjualan'))]
       );
@@ -3211,7 +3277,14 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   Widget _card(String title, String value, IconData icon) => Card(child:Padding(padding:const EdgeInsets.all(12),child:Row(children:[Icon(icon,color:green,size:28),const SizedBox(width:10),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontSize:12,color:Colors.black54)),Text(value,style:const TextStyle(fontSize:20,fontWeight:FontWeight.bold))]))])));
   Widget _stockPage() => ListView(padding:const EdgeInsets.all(12),children:[
     const Text('Stok Gas Siap Jual dan Tabung',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
-    for(final v in lpgVariants) Builder(builder:(_){final s=_stock(v);return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(v,style:const TextStyle(fontWeight:FontWeight.bold)),Wrap(spacing:12,runSpacing:8,children:[Text('Isi: ${s['full']}'),Text('Kosong: ${s['empty']}'),Text('Karantina: ${s['quarantine']}'),Text('Dipinjam: ${s['borrowed']}'),Text('Dalam retur agen: ${s['inTransit']}')])])));}),
+    Card(color:const Color(0xFFE8F7EF),child:ListTile(
+      leading:const Icon(Icons.outbound,color:Color(0xFF087F5B),size:32),
+      title:const Text('Tabung yang Berada di Luar',style:TextStyle(fontWeight:FontWeight.bold)),
+      subtitle:const Text('Catat tabung yang sudah dipinjamkan dan lihat daftar peminjam.'),
+      trailing:const Icon(Icons.chevron_right),
+      onTap:()=>setState(()=>tab=1),
+    )),
+    for(final v in lpgVariants) Builder(builder:(_){final s=_stock(v);return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(v,style:const TextStyle(fontWeight:FontWeight.bold)),Wrap(spacing:12,runSpacing:8,children:[Text('Isi: ${s['full']}'),Text('Kosong: ${s['empty']}'),Text('Dipinjam di luar: ${s['borrowed']}'),Text('Karantina: ${s['quarantine']}'),Text('Dalam retur agen: ${s['inTransit']}')])])));}),
     const SizedBox(height:12),FilledButton.icon(onPressed:_openingDialog,icon:const Icon(Icons.add_box),label:const Text('Input Stok Awal')),
     FilledButton.icon(onPressed:_stockOpnameDialog,icon:const Icon(Icons.fact_check),label:const Text('Stock Opname / Koreksi Fisik')),
   ]);
@@ -3323,9 +3396,12 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   ]);
 
   Widget _borrowPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    FilledButton.icon(onPressed:_borrowDialog,icon:const Icon(Icons.add),label:const Text('Catat Peminjaman Baru')),
-    OutlinedButton.icon(onPressed:_openingBorrowedDialog,icon:const Icon(Icons.add_business),label:const Text('Tambah Saldo Tabung yang Sudah di Luar')),
-    for(final v in lpgVariants) Builder(builder:(_){final st=_stock(v);return Card(child:ListTile(title:Text(v),subtitle:Text('Masih di luar: ${st['borrowed']} tabung')));}),
+    const Text('TABUNG YANG BERADA DI LUAR',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold)),
+    const Text('Catat juga saldo tabung yang sudah dipinjamkan sebelum aplikasi digunakan. Pencatatan saldo awal tidak mengurangi stok gudang lagi.'),
+    const SizedBox(height:10),
+    FilledButton.icon(onPressed:_openingBorrowedDialog,icon:const Icon(Icons.add_business),label:const Text('TAMBAH TABUNG YANG SUDAH DI LUAR')),
+    OutlinedButton.icon(onPressed:_borrowDialog,icon:const Icon(Icons.add),label:const Text('Catat Peminjaman Baru dari Gudang')),
+    for(final v in lpgVariants) Builder(builder:(_){final st=_stock(v);return Card(color:const Color(0xFFE8F7EF),child:ListTile(leading:const Icon(Icons.propane_tank),title:Text(v,style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('Masih dipinjam di luar: ${st['borrowed']} tabung')));}),
     for(final loan in rows('LPG_Peminjaman').where((x)=>x['voided']!=true))
       Card(child:ListTile(
         title:Text('${loan['borrower']} • ${loan['variant']}'),
@@ -3366,7 +3442,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
           pw.Text('BUKTI PEMBAYARAN / STRUK PENJUALAN',style:const pw.TextStyle(fontSize:9)),
         ])),
         pw.SizedBox(height:16),
-        pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Text('No. Transaksi: ${r['id']}',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text('${r['date']}')]),
+        pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Text('No. Transaksi: ${r['id']}',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text(_formatLpgDate(r['date']))]),
         pw.Divider(),
         pw.Text('Pelanggan: ${r['customer']}'),
         if('${r['buyer']??''}'.isNotEmpty)pw.Text('Nama pembeli: ${r['buyer']}'),
@@ -3397,7 +3473,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       final connected = await PrintBluetoothThermal.connect(macPrinterAddress: devices.first.macAdress);
       if (!connected) { _msg('Tidak dapat terhubung ke printer.'); return; }
       final textReceipt = '       PANGKALAN LPG\n'
-        '--------------------------------\nNo: ${r['id']}\nTanggal: ${r['date']}\n'
+        '--------------------------------\nNo: ${r['id']}\nTanggal: ${_formatLpgDate(r['date'])}\n'
         'Pelanggan: ${r['customer']}\n${r['variant']} x ${r['qty']}\n'
         'Harga: ${money.format(d(r['unitPrice']))}\nTotal: ${money.format(d(r['total']))}\n'
         'Bayar: ${money.format(d(r['paid']))}\nSisa: ${money.format(d(r['remaining']))}\n'
@@ -3420,7 +3496,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
             pw.Center(child: pw.Text('NOTA PENAGIHAN KASBON LPG', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold))),
             pw.Divider(),
             pw.Text('No. Kasbon: ${debt['id']}'),
-            pw.Text('Tanggal: ${debt['date']}'),
+            pw.Text('Tanggal: ${_formatLpgDate(debt['date'])}'),
             pw.Text('Pelanggan: ${debt['customer']}'),
             pw.Text('No. Penjualan: ${debt['saleId']}'),
             pw.SizedBox(height: 18),
@@ -3611,23 +3687,101 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
     }catch(e){_msg('Gagal hapus kasbon: $e');}
   }
 
-  Widget _salesPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.point_of_sale),label:const Text('Transaksi Penjualan LPG')),
-    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true)) Card(child:ListTile(
-      title:Text('${r['customer']} • ${r['variant']}'),
-      subtitle:Text('${r['items'] ?? ('${r['qty']} x ${money.format(d(r['unitPrice']))}')} • ${r['payment']} • ${r['date']}'),
-      trailing:PopupMenuButton<String>(onSelected:(v){if(v=='print')_printLpgReceipt(r);if(v=='wa')_shareReceipt(r);if(v=='void')_voidLpgRecord('LPG_Penjualan',r);if(v=='edit')_editSaleDialog(r);},itemBuilder:(_)=>const [
-        PopupMenuItem(value:'edit',child:Text('Edit penjualan')),
-        PopupMenuItem(value:'print',child:Text('Cetak struk Bluetooth')),
-        PopupMenuItem(value:'wa',child:Text('Bagikan PDF')),
-        PopupMenuItem(value:'void',child:Text('Hapus transaksi')),
-      ],child:Text(money.format(d(r['total'])))),
-    )),
-  ]);
+  Widget _salesPage() => ListView(
+    padding: const EdgeInsets.all(10),
+    children: [
+      FilledButton.icon(
+        onPressed: _saleDialog,
+        icon: const Icon(Icons.point_of_sale),
+        label: const Text('Transaksi Penjualan LPG'),
+      ),
+      const SizedBox(height: 6),
+      for (final r in rows('LPG_Penjualan').where((x) => x['voided'] != true).toList().reversed)
+        Builder(builder: (context) {
+          final items = _saleItems(r);
+          final debt = _saleDebt(r);
+          final remaining = debt == null ? 0.0 : d(debt['remaining']);
+          final paid = d(r['paid']);
+          return Card(
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Expanded(child: Text('${r['customer'] ?? 'Umum / Walk-in'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15))),
+                  if (debt != null)
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(20)), child: Text('ADA TUNGGAKAN', style: TextStyle(color: Colors.red.shade800, fontSize: 10, fontWeight: FontWeight.bold)))
+                  else
+                    Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(20)), child: Text('LUNAS', style: TextStyle(color: Colors.green.shade800, fontSize: 10, fontWeight: FontWeight.bold))),
+                ]),
+                const SizedBox(height: 3),
+                Text('${r['id'] ?? ''} • ${_formatLpgDate(r['date'])}', style: TextStyle(color: Colors.grey.shade700, fontSize: 11)),
+                const Divider(height: 12),
+                Row(children: const [
+                  Expanded(flex: 4, child: Text('Jenis LPG', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
+                  Expanded(flex: 2, child: Text('Banyak', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
+                  Expanded(flex: 3, child: Text('Harga/tabung', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
+                  Expanded(flex: 3, child: Text('Subtotal', textAlign: TextAlign.right, style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold))),
+                ]),
+                const SizedBox(height: 3),
+                for (final item in items)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Expanded(flex: 4, child: Text('${item['variant'] ?? '-'}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                      Expanded(flex: 2, child: Text('${n(item['qty'])} tabung', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12))),
+                      Expanded(flex: 3, child: Text(money.format(d(item['unitPrice'])), textAlign: TextAlign.right, style: const TextStyle(fontSize: 11))),
+                      Expanded(flex: 3, child: Text(money.format(d(item['total'])), textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
+                    ]),
+                  ),
+                const Divider(height: 12),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('Total pembelian', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text(money.format(d(r['total'])), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ]),
+                const SizedBox(height: 3),
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  Text('Pembayaran: ${_salePaymentLabel(r, debt)}', style: const TextStyle(fontSize: 12)),
+                  if (debt == null) Text('Dibayar ${money.format(paid)}', style: const TextStyle(fontSize: 12)),
+                ]),
+                if (debt != null) ...[
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Sudah dibayar: ${money.format(d(debt['paid']))}', style: const TextStyle(fontSize: 12)),
+                    Text('Sisa: ${money.format(remaining)}', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 12)),
+                  ]),
+                  const SizedBox(height: 7),
+                  SizedBox(width: double.infinity, child: FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700, visualDensity: VisualDensity.compact),
+                    onPressed: () => _settleDebt(debt),
+                    icon: const Icon(Icons.payments, size: 17),
+                    label: const Text('Bayar Tunggakan'),
+                  )),
+                ],
+                Align(alignment: Alignment.centerRight, child: PopupMenuButton<String>(
+                  onSelected: (v) {
+                    if (v == 'print') _printLpgReceipt(r);
+                    if (v == 'wa') _shareReceipt(r);
+                    if (v == 'void') _voidLpgRecord('LPG_Penjualan', r);
+                    if (v == 'edit') _editSaleDialog(r);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit penjualan')),
+                    PopupMenuItem(value: 'print', child: Text('Cetak struk Bluetooth')),
+                    PopupMenuItem(value: 'wa', child: Text('Bagikan PDF')),
+                    PopupMenuItem(value: 'void', child: Text('Hapus transaksi')),
+                  ],
+                  child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.more_horiz)),
+                )),
+              ]),
+            ),
+          );
+        }),
+    ],
+  );
 
   Widget _purchasePage()=>ListView(padding:const EdgeInsets.all(12),children:[
     FilledButton.icon(onPressed:_purchaseDialog,icon:const Icon(Icons.add_shopping_cart),label:const Text('Catat Pembelian dari Agen')),
-    for(final r in rows('LPG_Pembelian').where((x)=>x['voided']!=true)) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${r['date']}'),trailing:PopupMenuButton<String>(onSelected:(v){if(v=='void')_voidLpgRecord('LPG_Pembelian',r);},itemBuilder:(_)=>const [PopupMenuItem(value:'void',child:Text('Batalkan pembelian'))],child:Text(money.format(d(r['total'])))))),
+    for(final r in rows('LPG_Pembelian').where((x)=>x['voided']!=true)) Card(child:ListTile(title:Text('${r['agent']} • ${r['variant']}'),subtitle:Text('${r['qty']} tabung • ${r['payment']} • ${_formatLpgDate(r['date'])}'),trailing:PopupMenuButton<String>(onSelected:(v){if(v=='void')_voidLpgRecord('LPG_Pembelian',r);},itemBuilder:(_)=>const [PopupMenuItem(value:'void',child:Text('Batalkan pembelian'))],child:Text(money.format(d(r['total'])))))),
   ]);
 
   Widget _debtsPage()=>ListView(padding:const EdgeInsets.all(12),children:[
@@ -3674,12 +3828,12 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         for(final pair in <List<String>>[['Penjualan',money.format(totalSales)],['Pembelian',money.format(totalPurchases)],['Penerimaan Tunai',money.format(cash)],['Penerimaan QRIS',money.format(qris)],['Kasbon aktif',money.format(rows('LPG_Kasbon').where((r)=>r['status']!='Lunas'&&r['voided']!=true).fold<double>(0,(a,r)=>a+d(r['remaining']))) ]])pw.TableRow(children:pair.map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(9),child:pw.Text(v))).toList())
       ]),
       pw.SizedBox(height:18),pw.Text('Rincian Penjualan',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
-      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Pelanggan','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...sales.map((r)=>pw.TableRow(children:['${r['date']}','${r['customer']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
+      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Pelanggan','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...sales.map((r)=>pw.TableRow(children:['${_formatLpgDate(r['date'])}','${r['customer']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
       pw.SizedBox(height:18),pw.Text('Rincian Pembelian',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
-      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Agen','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...purchases.map((r)=>pw.TableRow(children:['${r['date']}','${r['agent']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
+      pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Tanggal','Agen','Jenis LPG','Total'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:9)))).toList()),...purchases.map((r)=>pw.TableRow(children:['${_formatLpgDate(r['date'])}','${r['agent']}','${r['variant']}','${money.format(d(r['total']))}'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(6),child:pw.Text(v,style:const pw.TextStyle(fontSize:8)))).toList()))]),
       pw.SizedBox(height:16),pw.Text('Stok saat laporan dibuat',style:pw.TextStyle(fontSize:14,fontWeight:pw.FontWeight.bold)),
       for(final v in lpgVariants)pw.Text('$v: isi ${_stock(v)['full']}, kosong ${_stock(v)['empty']}, dipinjam ${_stock(v)['borrowed']}, karantina ${_stock(v)['quarantine']}'),
-      pw.SizedBox(height:24),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Text('Dicetak: ${dateNow()}')),
+      pw.SizedBox(height:24),pw.Align(alignment:pw.Alignment.centerRight,child:pw.Text('Dicetak: ${_formatLpgDate(DateTime.now().toIso8601String())}')),
     ]));
     await Printing.sharePdf(bytes:await doc.save(),filename:'Laporan_LPG_${reportMonthly?'Bulanan':'Harian'}_${DateFormat('yyyyMMdd').format(reportDate)}.pdf');
   }
@@ -3736,15 +3890,15 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
   }
 
   Widget _historyPage()=>ListView(padding:const EdgeInsets.all(12),children:[
-    for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''} • ${r['date']??''}')),
-    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${r['date']}')),
+    for(final r in rows('LPG_Riwayat').reversed) ListTile(leading:const Icon(Icons.history),title:Text(r['activity']??''),subtitle:Text('${r['description']??''} • ${_formatLpgDate(r['date'])}')),
+    for(final r in rows('LPG_Penjualan').where((x)=>x['voided']!=true).toList().reversed) ListTile(leading:const Icon(Icons.receipt),title:Text('Penjualan ${r['id']}'),subtitle:Text('${r['customer']} • ${_formatLpgDate(r['date'])}')),
   ]);
 
   @override
   Widget build(BuildContext context) {
-    final pages=<Widget>[_salesPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_borrowPage(),_debtsPage(),_reportPage(),_historyPage()];
+    final pages=<Widget>[_salesPage(),_borrowPage(),_purchasePage(),_customersPage(),_stockPage(),_returnPage(),_debtsPage(),_reportPage(),_historyPage()];
     return Scaffold(
-      appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(tooltip:'Laporan harian/bulanan',onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.analytics_outlined)),IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
+      appBar:AppBar(title:const Text('Pangkalan GAS LPG'),backgroundColor:green,foregroundColor:Colors.white,actions:[IconButton(tooltip:'Tabung di luar',onPressed:()=>setState(()=>tab=1),icon:const Icon(Icons.outbound)),IconButton(tooltip:'Laporan harian/bulanan',onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.analytics_outlined)),IconButton(onPressed:_load,icon:const Icon(Icons.refresh))]),
       body:loading?const Center(child:CircularProgressIndicator()):pages[tab],
       floatingActionButton: tab==7 ? null : FloatingActionButton.extended(
         heroTag: 'lpg_report_shortcut',
@@ -3754,8 +3908,8 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
         icon: const Icon(Icons.analytics_outlined),
         label: const Text('Laporan'),
       ),
-      bottomNavigationBar:Container(color:Colors.white,height:72,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
-        for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:112,padding:const EdgeInsets.symmetric(horizontal:8,vertical:10),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.swap_horiz,Icons.account_balance_wallet,Icons.analytics,Icons.history][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
+      bottomNavigationBar:Container(color:Colors.white,height:68,child:SingleChildScrollView(scrollDirection:Axis.horizontal,child:Row(children:[
+        for(int i=0;i<tabs.length;i++) InkWell(onTap:()=>setState(()=>tab=i),child:Container(width:96,padding:const EdgeInsets.symmetric(horizontal:5,vertical:8),decoration:BoxDecoration(border:Border(top:BorderSide(color:tab==i?green:Colors.transparent,width:3))),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Icon([Icons.point_of_sale,Icons.outbound,Icons.shopping_cart,Icons.people,Icons.inventory,Icons.report,Icons.account_balance_wallet,Icons.analytics,Icons.history][i],color:tab==i?green:Colors.grey),Text(tabs[i],textAlign:TextAlign.center,maxLines:2,style:TextStyle(fontSize:10,fontWeight:tab==i?FontWeight.bold:FontWeight.normal,color:tab==i?green:Colors.grey[700]))]))),
       ]))),
     );
   }
