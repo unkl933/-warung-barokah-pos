@@ -2876,7 +2876,35 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
   Widget _sales() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.add),label:const Text('Catat Penjualan Gabah'))),..._type('PENJUALAN').reversed.map((r)=>_recordCard(r)),if(_type('PENJUALAN').isEmpty)_empty('Belum ada penjualan gabah.')]);
   Widget _loans() {final loans=_type('PINJAMAN');return ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_loanDialog,icon:const Icon(Icons.add),label:const Text('Berikan Pinjaman'))),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Text('Total saldo pinjaman: ${money.format(loans.fold(0.0,(a,r)=>a+_loanBalance(r)))}',style:const TextStyle(fontWeight:FontWeight.bold))),...loans.reversed.map((r)=>_recordCard(r,loan:true)),if(loans.isEmpty)_empty('Belum ada pinjaman kepada petani atau pengepul.')]);}
   Widget _shipments() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_shipmentDialog,icon:const Icon(Icons.add),label:const Text('Buat Laporan Pengiriman ke Pabrik'))),..._type('PENGIRIMAN').reversed.map((r)=>_recordCard(r)),if(_type('PENGIRIMAN').isEmpty)_empty('Belum ada pengiriman ke pabrik.')]);
-  Widget _stockPage() {final purchases=_type('PEMBELIAN');final sales=_type('PENJUALAN');final ships=_type('PENGIRIMAN');final varieties=<String>{...purchases.map((r=>'${r['variety']??'Gabah'}')),...sales.map((r=>'${r['variety']??'Gabah'}')),...ships.map((r=>'${r['variety']??'Gabah'}'))};return ListView(padding:const EdgeInsets.all(12),children:[_metric('Stok tersedia','${kgFormat.format(_stock)} kg',Icons.warehouse),const SizedBox(height:8),_metric('Total masuk','${kgFormat.format(purchases.fold(0.0,(a,r)=>a+_num(r['net'])))} kg',Icons.south_west),const SizedBox(height:8),_metric('Penjualan langsung','${kgFormat.format(sales.fold(0.0,(a,r)=>a+_num(r['net'])))} kg',Icons.north_east),const SizedBox(height:8),_metric('Keluar ke pabrik','${kgFormat.format(ships.fold(0.0,(a,r)=>a+_num(r['beratPembelian'])))} kg',Icons.local_shipping),_sectionTitle('Stok per jenis gabah','Stok dihitung dari pembelian dikurangi penjualan dan pengiriman'),...varieties.map((v)=>Card(child:ListTile(title:Text(v),trailing:Text('${kgFormat.format(_stockFor(v))} kg',style:const TextStyle(fontWeight:FontWeight.bold,color:green)))))]);}
+  Widget _stockPage() {
+    final purchases = _type('PEMBELIAN');
+    final sales = _type('PENJUALAN');
+    final ships = _type('PENGIRIMAN');
+    final varieties = <String>{
+      ...purchases.map((r) => (r['variety'] ?? 'Gabah').toString()),
+      ...sales.map((r) => (r['variety'] ?? 'Gabah').toString()),
+      ...ships.map((r) => (r['variety'] ?? 'Gabah').toString()),
+    };
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        _metric('Stok tersedia', '${kgFormat.format(_stock)} kg', Icons.warehouse),
+        const SizedBox(height: 8),
+        _metric('Total masuk', '${kgFormat.format(purchases.fold(0.0, (a, r) => a + _num(r['net'])))} kg', Icons.south_west),
+        const SizedBox(height: 8),
+        _metric('Penjualan langsung', '${kgFormat.format(sales.fold(0.0, (a, r) => a + _num(r['net'])))} kg', Icons.north_east),
+        const SizedBox(height: 8),
+        _metric('Keluar ke pabrik', '${kgFormat.format(ships.fold(0.0, (a, r) => a + _num(r['beratPembelian'])))} kg', Icons.local_shipping),
+        _sectionTitle('Stok per jenis gabah', 'Stok dihitung dari pembelian dikurangi penjualan dan pengiriman'),
+        ...varieties.map((v) => Card(
+          child: ListTile(
+            title: Text(v),
+            trailing: Text('${kgFormat.format(_stockFor(v))} kg', style: const TextStyle(fontWeight: FontWeight.bold, color: green)),
+          ),
+        )),
+      ],
+    );
+  }
   Widget _reports() {final shipments=_type('PENGIRIMAN');final diff=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['selisih']));final profit=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['labaBersih']));final loan=_type('PINJAMAN').fold(0.0,(a,r)=>a+_loanBalance(r));return ListView(padding:const EdgeInsets.all(12),children:[_metric('Total pembelian',money.format(_totalPembelian),Icons.shopping_cart),const SizedBox(height:8),_metric('Total penjualan langsung',money.format(_totalPenjualan),Icons.store),const SizedBox(height:8),_metric('Total nilai pengiriman pabrik',money.format(_totalPengiriman),Icons.business),const SizedBox(height:8),_metric('Total selisih timbangan', '${kgFormat.format(diff)} kg',Icons.scale),const SizedBox(height:8),_metric('Laba pengiriman (estimasi)',money.format(profit),Icons.trending_up),const SizedBox(height:8),_metric('Sisa pinjaman petani/pengepul',money.format(loan),Icons.account_balance_wallet),const SizedBox(height:12),const Text('Rincian pengiriman per transaksi',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),...shipments.reversed.map((r)=>_recordCard(r))]);}
 
   @override
