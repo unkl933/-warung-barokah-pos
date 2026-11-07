@@ -2728,17 +2728,17 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
   final List<Map<String, dynamic>> data = [];
   bool loading = false;
   String error = '';
-  late final TabController tabs;
+  int _currentIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    tabs = TabController(length: 7, vsync: this);
     _load();
   }
 
   @override
-  void dispose() { tabs.dispose(); super.dispose(); }
+  @override
+  void dispose() { super.dispose(); }
 
   double _num(dynamic v) { if (v is num) return v.toDouble(); var s='${v ?? 0}'.trim().replaceAll(' ', ''); if (s.contains(',')) s=s.replaceAll('.', '').replaceAll(',', '.'); return double.tryParse(s) ?? 0; }
   String _id(String prefix) => '$prefix-${DateTime.now().millisecondsSinceEpoch}';
@@ -2791,10 +2791,40 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
       'buyPrice':buyPrice,'sellPrice':sellPrice,'total':total,'payment':payment,
       'status':status,'extra':jsonEncode({...extra,'id':id,'type':type,'party':party,'description':description,'total':total,'payment':payment,'status':status})
     };
-    final response = await http.post(Uri.parse(widget.apiUrl),headers:{'Content-Type':'application/json'},body:jsonEncode(payload)).timeout(const Duration(seconds:30));
-    if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
+    // Apps Script ContentService sering membalas POST dengan HTTP 302
+    // menuju script.googleusercontent.com. Tangani redirect secara eksplisit.
+    final client = http.Client();
+    http.Response response;
+    try {
+      final request = http.Request('POST', Uri.parse(widget.apiUrl))
+        ..followRedirects = false
+        ..headers['Content-Type'] = 'application/json'
+        ..body = jsonEncode(payload);
+      final streamed = await client.send(request).timeout(const Duration(seconds: 40));
+      response = await http.Response.fromStream(streamed);
+
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        final location = response.headers['location'];
+        if (location == null || location.isEmpty) {
+          throw Exception(
+            'Apps Script mengembalikan HTTP ${response.statusCode} tanpa alamat pengalihan. '
+            'Periksa URL dan deployment Web App.',
+          );
+        }
+        response = await client.get(Uri.parse(location))
+            .timeout(const Duration(seconds: 40));
+      }
+    } finally {
+      client.close();
+    }
+
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
     final result = jsonDecode(response.body);
-    if (result is Map && result['status'] == 'error') throw Exception(result['message'] ?? 'Gagal menyimpan');
+    if (result is Map && result['status'] == 'error') {
+      throw Exception(result['message'] ?? 'Gagal menyimpan');
+    }
     await _load();
   }
 
@@ -2908,7 +2938,120 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
   Widget _reports() {final shipments=_type('PENGIRIMAN');final diff=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['selisih']));final profit=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['labaBersih']));final loan=_type('PINJAMAN').fold(0.0,(a,r)=>a+_loanBalance(r));return ListView(padding:const EdgeInsets.all(12),children:[_metric('Total pembelian',money.format(_totalPembelian),Icons.shopping_cart),const SizedBox(height:8),_metric('Total penjualan langsung',money.format(_totalPenjualan),Icons.store),const SizedBox(height:8),_metric('Total nilai pengiriman pabrik',money.format(_totalPengiriman),Icons.business),const SizedBox(height:8),_metric('Total selisih timbangan', '${kgFormat.format(diff)} kg',Icons.scale),const SizedBox(height:8),_metric('Laba pengiriman (estimasi)',money.format(profit),Icons.trending_up),const SizedBox(height:8),_metric('Sisa pinjaman petani/pengepul',money.format(loan),Icons.account_balance_wallet),const SizedBox(height:12),const Text('Rincian pengiriman per transaksi',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),...shipments.reversed.map((r)=>_recordCard(r))]);}
 
   @override
-  Widget build(BuildContext context) => Scaffold(backgroundColor:pale,appBar:AppBar(title:const Text('Jual Beli Gabah / Padi'),actions:[IconButton(onPressed:_load,icon:const Icon(Icons.refresh),tooltip:'Muat ulang')],bottom:TabBar(controller:tabs,isScrollable:true,tabs:const[Tab(text:'Ringkasan'),Tab(text:'Pembelian'),Tab(text:'Penjualan'),Tab(text:'Pinjaman'),Tab(text:'Pengiriman'),Tab(text:'Stok'),Tab(text:'Laporan')])),body:loading&&data.isEmpty?const Center(child:CircularProgressIndicator()):TabBarView(controller:tabs,children:[_dashboard(),_purchases(),_sales(),_loans(),_shipments(),_stockPage(),_reports()]));
+  Widget build(BuildContext context) {
+    final pages = <Widget>[
+      _dashboard(),
+      _purchases(),
+      _sales(),
+      _loans(),
+      _shipments(),
+      _stockPage(),
+      _reports(),
+    ];
+
+    return Scaffold(
+      backgroundColor: pale,
+      appBar: AppBar(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.20),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.grass_rounded, color: Colors.white, size: 23),
+            ),
+            const SizedBox(width: 10),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Jual Beli Gabah',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                ),
+                Text(
+                  'Warung Barokah',
+                  style: TextStyle(fontSize: 11, color: Colors.white70),
+                ),
+              ],
+            ),
+          ],
+        ),
+        backgroundColor: green,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            onPressed: _load,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Muat ulang',
+          ),
+        ],
+      ),
+      body: loading && data.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : IndexedStack(
+              index: _currentIndex,
+              children: pages,
+            ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          selectedItemColor: green,
+          unselectedItemColor: Colors.grey[400],
+          backgroundColor: Colors.white,
+          type: BottomNavigationBarType.fixed,
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 10,
+          ),
+          unselectedLabelStyle: const TextStyle(fontSize: 10),
+          iconSize: 22,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.dashboard_rounded),
+              label: 'Ringkasan',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.shopping_cart_outlined),
+              label: 'Pembelian',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.storefront_outlined),
+              label: 'Penjualan',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.account_balance_wallet_outlined),
+              label: 'Pinjaman',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.local_shipping_outlined),
+              label: 'Kirim Pabrik',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.warehouse_outlined),
+              label: 'Stok',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.analytics_outlined),
+              label: 'Laporan',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class LpgModuleScreen extends StatefulWidget {
