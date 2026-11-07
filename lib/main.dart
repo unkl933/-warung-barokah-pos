@@ -527,6 +527,15 @@ class _MainHomeScreenState extends State<MainHomeScreen> {
                         Navigator.push(context, MaterialPageRoute(builder: (_) => LpgModuleScreen(apiUrl: googleSheetUrl)));
                       },
                     ),
+                    ListTile(
+                      leading: const Icon(Icons.grass, color: Color(0xFF10B981)),
+                      title: const Text('Jual Beli Gabah / Padi'),
+                      subtitle: const Text('Pembelian, penjualan, pinjaman, stok dan pengiriman pabrik'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => GabahModuleScreen(apiUrl: googleSheetUrl)));
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -2699,6 +2708,181 @@ class BarcodeScannerScreen extends StatelessWidget {
 const List<String> lpgVariants = ['LPG 3 kg', 'LPG 5,5 kg', 'LPG 12 kg'];
 const List<String> lpgAgents = ['PT. Mutiara Sri Rengganis', 'PT. Petro Lindo Jaya Utama'];
 
+
+// =============================================================
+// MODUL JUAL BELI GABAH / PADI
+// Data disimpan terpisah pada sheet MOD_GABAH melalui endpoint modul usaha.
+// =============================================================
+class GabahModuleScreen extends StatefulWidget {
+  final String apiUrl;
+  const GabahModuleScreen({super.key, required this.apiUrl});
+  @override
+  State<GabahModuleScreen> createState() => _GabahModuleScreenState();
+}
+
+class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTickerProviderStateMixin {
+  static const Color green = Color(0xFF10B981);
+  static const Color pale = Color(0xFFF4FDF4);
+  final NumberFormat money = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
+  final NumberFormat kgFormat = NumberFormat('#,##0.##', 'id_ID');
+  final List<Map<String, dynamic>> data = [];
+  bool loading = false;
+  String error = '';
+  late final TabController tabs;
+
+  @override
+  void initState() {
+    super.initState();
+    tabs = TabController(length: 7, vsync: this);
+    _load();
+  }
+
+  @override
+  void dispose() { tabs.dispose(); super.dispose(); }
+
+  double _num(dynamic v) { if (v is num) return v.toDouble(); var s='${v ?? 0}'.trim().replaceAll(' ', ''); if (s.contains(',')) s=s.replaceAll('.', '').replaceAll(',', '.'); return double.tryParse(s) ?? 0; }
+  String _id(String prefix) => '$prefix-${DateTime.now().millisecondsSinceEpoch}';
+  Map<String, dynamic> _extra(Map<String, dynamic> r) {
+    final raw = r['extra'];
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    try { final x = jsonDecode(raw?.toString() ?? '{}'); if (x is Map) return Map<String,dynamic>.from(x); } catch (_) {}
+    return <String,dynamic>{};
+  }
+  List<Map<String,dynamic>> get _rows => data.map((r) => <String,dynamic>{...r, ..._extra(r)}).toList();
+  List<Map<String,dynamic>> _type(String t) => _rows.where((r) => r['type'] == t && r['voided'] != true).toList();
+  double get _stock => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENJUALAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENGIRIMAN').fold(0.0,(a,r)=>a+_num(r['beratPembelian']));
+  double get _totalPembelian => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['total']));
+  double get _totalPenjualan => _type('PENJUALAN').fold(0.0,(a,r)=>a+_num(r['total']));
+  double get _totalPengiriman => _type('PENGIRIMAN').fold(0.0,(a,r)=>a+_num(r['nilaiJual']));
+  double _stockFor(String variety) { final p=_type('PEMBELIAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final s=_type('PENJUALAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final h=_type('PENGIRIMAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['beratPembelian'])); return p-s-h; }
+  double _avgCostFor(String variety) { final rows=_type('PEMBELIAN').where((r)=>'${r['variety']}'==variety).toList(); final qty=rows.fold(0.0,(a,r)=>a+_num(r['net'])); final value=rows.fold(0.0,(a,r)=>a+_num(r['total'])); return qty<=0?0:value/qty; }
+  double get _avgCost => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['total'])) / (_type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])) == 0 ? 1 : _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])));
+  double _loanBalance(Map<String,dynamic> loan) {
+    final x = _num(loan['amount']);
+    final paid = _type('PENGEMBALIAN_PINJAMAN').where((r)=>r['loanId']==loan['id']).fold(0.0,(a,r)=>a+_num(r['amount']));
+    final offsets = _type('PEMBELIAN').where((r)=>r['loanId']==loan['id']).fold(0.0,(a,r)=>a+_num(r['loanOffset']));
+    return (x-paid-offsets).clamp(0.0,x).toDouble();
+  }
+
+  Future<void> _load() async {
+    setState(() { loading = true; error = ''; });
+    try {
+      final uri = Uri.parse('${widget.apiUrl}?action=getModuleData&module=GABAH');
+      final response = await http.get(uri).timeout(const Duration(seconds: 30));
+      if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
+      final decoded = jsonDecode(response.body);
+      if (decoded is! List) throw Exception('Format data Gabah tidak valid');
+      data
+        ..clear()
+        ..addAll(decoded.whereType<Map>().map((e)=>Map<String,dynamic>.from(e)));
+      if (mounted) setState(() {});
+    } catch (e) {
+      error = e.toString();
+      if (mounted) setState(() {});
+    } finally { if (mounted) setState(() => loading = false); }
+  }
+
+  Future<void> _save({required String type, required String party, required String description, double qty=0, String unit='kg', double buyPrice=0, double sellPrice=0, required double total, String payment='Tunai', String status='Tersimpan', required Map<String,dynamic> extra}) async {
+    final id = _id('GBH');
+    final payload = {
+      'action':'saveModuleRecord','module':'GABAH','id':id,
+      'date':DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
+      'type':type,'party':party,'description':description,'qty':qty,'unit':unit,
+      'buyPrice':buyPrice,'sellPrice':sellPrice,'total':total,'payment':payment,
+      'status':status,'extra':jsonEncode({...extra,'id':id,'type':type,'party':party,'description':description,'total':total,'payment':payment,'status':status})
+    };
+    final response = await http.post(Uri.parse(widget.apiUrl),headers:{'Content-Type':'application/json'},body:jsonEncode(payload)).timeout(const Duration(seconds:30));
+    if (response.statusCode != 200) throw Exception('HTTP ${response.statusCode}');
+    final result = jsonDecode(response.body);
+    if (result is Map && result['status'] == 'error') throw Exception(result['message'] ?? 'Gagal menyimpan');
+    await _load();
+  }
+
+  Widget _metric(String label, String value, IconData icon, {Color color=green}) => Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(children:[CircleAvatar(backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color)),const SizedBox(width:12),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(label,style:const TextStyle(color:Colors.black54,fontSize:12)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:17))]))])));
+  Widget _sectionTitle(String title, String subtitle) => Padding(padding:const EdgeInsets.fromLTRB(16,16,16,8),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(title,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),Text(subtitle,style:const TextStyle(color:Colors.black54,fontSize:12))]));
+  Widget _empty(String msg) => Center(child:Padding(padding:const EdgeInsets.all(28),child:Text(msg,textAlign:TextAlign.center,style:const TextStyle(color:Colors.black54))));
+  InputDecoration _dec(String label,{String? hint}) => InputDecoration(labelText:label,hintText:hint,border:const OutlineInputBorder(),isDense:true);
+  Widget _field(TextEditingController c,String label,{bool number=false,String? hint}) => TextField(controller:c,keyboardType:number?const TextInputType.numberWithOptions(decimal:true):TextInputType.text,decoration:_dec(label,hint:hint));
+
+  Future<void> _purchaseDialog() async {
+    final party=TextEditingController(), variety=TextEditingController(text:'Ciherang'), gross=TextEditingController(), sacks=TextEditingController(text:'0'), moisture=TextEditingController(), price=TextEditingController(), discount=TextEditingController(text:'0'), paid=TextEditingController(), loanOffset=TextEditingController(text:'0'), staff=TextEditingController();
+    final openLoans=_type('PINJAMAN').where((r)=>_loanBalance(r)>0).toList();
+    String selectedLoanId=''; String method='Tunai';
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Pembelian Gabah'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[_field(party,'Nama petani / pengepul'),const SizedBox(height:9),_field(variety,'Jenis / varietas gabah'),const SizedBox(height:9),_field(gross,'Berat bruto (kg)',number:true),const SizedBox(height:9),_field(sacks,'Berat karung (kg)',number:true),const SizedBox(height:9),_field(moisture,'Kadar air (%)',number:true),const SizedBox(height:9),_field(price,'Harga beli per kg (Rp)',number:true),const SizedBox(height:9),_field(discount,'Potongan kualitas (Rp)',number:true),const SizedBox(height:9),_field(paid,'Dibayar tunai/transfer sekarang (Rp)',number:true),const SizedBox(height:9),DropdownButtonFormField<String>(value:selectedLoanId,decoration:_dec('Potong pinjaman (opsional)'),items:[const DropdownMenuItem(value:'',child:Text('Tidak ada potongan')), ...openLoans.map((l)=>DropdownMenuItem(value:'${l['id']}',child:Text('${l['party']} • sisa ${money.format(_loanBalance(l))}')))],onChanged:(v)=>setD(()=>selectedLoanId=v??'')),const SizedBox(height:9),_field(loanOffset,'Jumlah potongan pinjaman (Rp)',number:true),const SizedBox(height:9),_field(staff,'Petugas'),const SizedBox(height:9),DropdownButtonFormField<String>(value:method,decoration:_dec('Metode pembayaran'),items:['Tunai','Transfer','QRIS','Utang','Sebagian'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v)=>setD(()=>method=v??'Tunai'))])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final net=(_num(gross.text)-_num(sacks.text));final total=(net*_num(price.text)-_num(discount.text)).clamp(0.0,double.infinity).toDouble();final p=_num(paid.text), offset=_num(loanOffset.text);final selectedLoan=openLoans.where((l)=>'${l['id']}'==selectedLoanId).toList();if(offset>0&&(selectedLoan.isEmpty||'${selectedLoan.first['party']}'!=party.text.trim()||offset>_loanBalance(selectedLoan.first))){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Pilih pinjaman dan pastikan potongan tidak melebihi saldo pinjaman.')));return;}if(p+offset>total){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Pembayaran dan potongan pinjaman melebihi total pembelian.')));return;}if(party.text.trim().isEmpty||net<=0||_num(price.text)<=0){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Lengkapi pemasok, berat netto, dan harga.')));return;}try{await _save(type:'PEMBELIAN',party:party.text.trim(),description:'Pembelian ${variety.text}; kadar air ${moisture.text}%',qty:net,buyPrice:_num(price.text),total:total,payment:method,status:p+offset>=total?'Lunas':p+offset>0?'Dibayar sebagian':'Belum dibayar',extra:{'variety':variety.text,'gross':_num(gross.text),'sackWeight':_num(sacks.text),'net':net,'moisture':_num(moisture.text),'price':_num(price.text),'discount':_num(discount.text),'paid':p,'loanId':selectedLoanId,'loanOffset':offset,'remaining':(total-p-offset).clamp(0.0,double.infinity),'staff':staff.text,'date':DateTime.now().toIso8601String()});if(ctx.mounted)Navigator.pop(ctx);if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Pembelian gabah tersimpan.')));}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal menyimpan: $e')));}},child:const Text('Simpan'))])));
+    for(final c in [party,variety,gross,sacks,moisture,price,discount,paid,loanOffset,staff]){c.dispose();}
+  }
+
+  Future<void> _saleDialog() async {
+    final party=TextEditingController(), variety=TextEditingController(text:'Ciherang'), net=TextEditingController(), price=TextEditingController(), discount=TextEditingController(text:'0'), paid=TextEditingController(), staff=TextEditingController(); String method='Tunai';
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Penjualan Gabah'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[_field(party,'Nama pembeli / pengepul'),const SizedBox(height:9),_field(variety,'Jenis gabah'),const SizedBox(height:9),_field(net,'Berat netto dijual (kg)',number:true),const SizedBox(height:9),_field(price,'Harga jual per kg (Rp)',number:true),const SizedBox(height:9),_field(discount,'Potongan (Rp)',number:true),const SizedBox(height:9),_field(paid,'Dibayar sekarang (Rp)',number:true),const SizedBox(height:9),_field(staff,'Petugas'),const SizedBox(height:9),DropdownButtonFormField<String>(value:method,decoration:_dec('Metode pembayaran'),items:['Tunai','Transfer','QRIS','Piutang','Sebagian'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v)=>setD(()=>method=v??'Tunai'))])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final q=_num(net.text), total=(_num(net.text)*_num(price.text)-_num(discount.text)).clamp(0.0,double.infinity).toDouble(),p=_num(paid.text);if(party.text.trim().isEmpty||q<=0||_num(price.text)<=0){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Lengkapi pembeli, berat, dan harga.')));return;}if(q>_stockFor(variety.text.trim())){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Stok ${variety.text} tidak cukup. Tersedia ${kgFormat.format(_stockFor(variety.text.trim()))} kg.')));return;}try{await _save(type:'PENJUALAN',party:party.text.trim(),description:'Penjualan ${variety.text}',qty:q,sellPrice:_num(price.text),total:total,payment:method,status:p>=total?'Lunas':p>0?'Dibayar sebagian':'Belum dibayar',extra:{'variety':variety.text,'net':q,'price':_num(price.text),'discount':_num(discount.text),'paid':p,'remaining':(total-p).clamp(0.0,double.infinity),'staff':staff.text});if(ctx.mounted)Navigator.pop(ctx);if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Penjualan tersimpan.')));}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal: $e')));}},child:const Text('Simpan'))])));
+    for(final c in [party,variety,net,price,discount,paid,staff]){c.dispose();}
+  }
+
+  Future<void> _loanDialog() async {
+    final party=TextEditingController(), amount=TextEditingController(), reason=TextEditingController(), staff=TextEditingController(); String kind='Petani', method='Tunai';
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Pinjaman Petani / Pengepul'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[DropdownButtonFormField<String>(value:kind,decoration:_dec('Jenis penerima'),items:['Petani','Pengepul'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v)=>setD(()=>kind=v??'Petani')),const SizedBox(height:9),_field(party,'Nama penerima'),const SizedBox(height:9),_field(amount,'Jumlah pinjaman (Rp)',number:true),const SizedBox(height:9),_field(reason,'Keperluan / keterangan'),const SizedBox(height:9),_field(staff,'Petugas'),const SizedBox(height:9),DropdownButtonFormField<String>(value:method,decoration:_dec('Metode pemberian'),items:['Tunai','Transfer'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v)=>setD(()=>method=v??'Tunai'))])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final a=_num(amount.text);if(party.text.trim().isEmpty||a<=0)return;try{await _save(type:'PINJAMAN',party:party.text.trim(),description:'$kind: ${reason.text}',total:a,payment:method,status:'Belum lunas',extra:{'kind':kind,'amount':a,'reason':reason.text,'staff':staff.text,'paid':0});if(ctx.mounted)Navigator.pop(ctx);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal: $e')));}},child:const Text('Berikan pinjaman'))])));
+    for(final c in [party,amount,reason,staff]){c.dispose();}
+  }
+
+  Future<void> _repayDialog(Map<String,dynamic> loan) async {
+    final amount=TextEditingController(), staff=TextEditingController(); String method='Tunai'; final remain=_loanBalance(loan);
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:Text('Pengembalian ${loan['party']}'),content:Column(mainAxisSize:MainAxisSize.min,children:[Text('Sisa pinjaman: ${money.format(remain)}'),const SizedBox(height:10),_field(amount,'Jumlah pengembalian (Rp)',number:true),const SizedBox(height:10),_field(staff,'Petugas'),const SizedBox(height:10),DropdownButtonFormField<String>(value:method,decoration:_dec('Metode'),items:['Tunai','Transfer','Potong pembelian gabah'].map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v)=>setD(()=>method=v??'Tunai'))]),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final a=_num(amount.text);if(a<=0||a>remain){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Jumlah melebihi sisa pinjaman atau tidak valid.')));return;}try{await _save(type:'PENGEMBALIAN_PINJAMAN',party:'${loan['party']}',description:'Pengembalian pinjaman ${loan['id']}',total:a,payment:method,status:'Tercatat',extra:{'loanId':loan['id'],'amount':a,'staff':staff.text});if(ctx.mounted)Navigator.pop(ctx);}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal: $e')));}},child:const Text('Simpan'))]))); amount.dispose();staff.dispose();
+  }
+
+  Future<void> _shipmentDialog() async {
+    final factory=TextEditingController(), variety=TextEditingController(text:'Ciherang'), purchaseWeight=TextEditingController(), dispatch=TextEditingController(), received=TextEditingController(), price=TextEditingController(), freight=TextEditingController(text:'0'), labor=TextEditingController(text:'0'), other=TextEditingController(text:'0'), paid=TextEditingController(text:'0'), vehicle=TextEditingController(), driver=TextEditingController(), staff=TextEditingController();
+    await showDialog(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setD)=>AlertDialog(title:const Text('Pengiriman ke Pabrik'),content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[_field(factory,'Nama pabrik tujuan'),const SizedBox(height:9),_field(variety,'Jenis gabah'),const SizedBox(height:9),_field(purchaseWeight,'Total berat pembelian yang masuk pengiriman (kg)',number:true),const SizedBox(height:9),_field(dispatch,'Berat keluar gudang / di atas kendaraan (kg)',number:true),const SizedBox(height:9),_field(received,'Berat timbangan pabrik (kg)',number:true),const SizedBox(height:9),_field(price,'Harga pabrik per kg (Rp)',number:true),const SizedBox(height:9),_field(freight,'Ongkos angkut (Rp)',number:true),const SizedBox(height:9),_field(labor,'Bongkar muat (Rp)',number:true),const SizedBox(height:9),_field(other,'Biaya lainnya (Rp)',number:true),const SizedBox(height:9),_field(paid,'Dibayar pabrik sekarang (Rp)',number:true),const SizedBox(height:9),_field(vehicle,'Kendaraan / nomor polisi'),const SizedBox(height:9),_field(driver,'Nama sopir'),const SizedBox(height:9),_field(staff,'Petugas pencatat')])),actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()async{final purchased=_num(purchaseWeight.text),q=_num(dispatch.text),w=_num(received.text),p=_num(price.text),cost=_num(freight.text)+_num(labor.text)+_num(other.text);if(factory.text.trim().isEmpty||purchased<=0||q<=0||w<=0||p<=0){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Lengkapi pabrik, berat, dan harga.')));return;}if(purchased>_stockFor(variety.text.trim())){ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Stok ${variety.text} tidak cukup. Tersedia ${kgFormat.format(_stockFor(variety.text.trim()))} kg.')));return;}final avgCost=_avgCostFor(variety.text.trim());final value=w*p,capital=purchased*avgCost,profit=value-capital-cost,diff=purchased-w;final shrinkWarehouse=purchased-q,shrinkTransit=q-w;try{await _save(type:'PENGIRIMAN',party:factory.text.trim(),description:'Pengiriman gabah ke ${factory.text}',qty:q,buyPrice:avgCost,sellPrice:p,total:value,payment:'Pembayaran pabrik',status:_num(paid.text)>=value?'Lunas':'Piutang',extra:{'variety':variety.text,'beratPembelian':purchased,'beratKirim':q,'beratPabrik':w,'selisih':diff,'selisihPersen':purchased==0?0:diff/purchased*100,'susutGudang':shrinkWarehouse,'selisihPerjalanan':shrinkTransit,'hargaPabrik':p,'nilaiJual':value,'modal':capital,'ongkosAngkut':_num(freight.text),'bongkarMuat':_num(labor.text),'biayaLain':_num(other.text),'totalBiaya':cost,'labaBersih':profit,'paid':_num(paid.text),'remaining':(value-_num(paid.text)).clamp(0.0,double.infinity),'vehicle':vehicle.text,'driver':driver.text,'staff':staff.text,'date':DateTime.now().toIso8601String()});if(ctx.mounted)Navigator.pop(ctx);if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Laporan pengiriman tersimpan.')));}catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal: $e')));}},child:const Text('Simpan pengiriman'))])));
+    for(final c in [factory,variety,purchaseWeight,dispatch,received,price,freight,labor,other,paid,vehicle,driver,staff]){c.dispose();}
+  }
+
+  Future<void> _pdf(Map<String,dynamic> r) async {
+    final doc=pw.Document(); final t='${r['type']??''}';
+    doc.addPage(pw.MultiPage(pageFormat:PdfPageFormat.a5,margin:const pw.EdgeInsets.all(26),build:(ctx)=>[pw.Container(padding:const pw.EdgeInsets.all(14),decoration:pw.BoxDecoration(color:PdfColor.fromInt(0xFFE9F8F1),borderRadius:pw.BorderRadius.circular(8)),child:pw.Column(crossAxisAlignment:pw.CrossAxisAlignment.start,children:[pw.Text('WARUNG BAROKAH',style:pw.TextStyle(fontSize:20,fontWeight:pw.FontWeight.bold,color:PdfColor.fromInt(0xFF087F5B))),pw.Text(t=='PENGIRIMAN'?'LAPORAN PENGIRIMAN GABAH':'BUKTI TRANSAKSI JUAL BELI GABAH',style:pw.TextStyle(fontSize:9,fontWeight:pw.FontWeight.bold))])),pw.SizedBox(height:16),pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Text('No. Transaksi: ${r['id']??''}',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text('${r['date']??''}')]),pw.Text('Pihak: ${r['party']??'-'}'),pw.Divider(),pw.Table(border:pw.TableBorder.all(color:PdfColors.grey300),children:[pw.TableRow(decoration:const pw.BoxDecoration(color:PdfColors.grey200),children:['Keterangan','Nilai'].map((v)=>pw.Padding(padding:const pw.EdgeInsets.all(7),child:pw.Text(v,style:pw.TextStyle(fontSize:9,fontWeight:pw.FontWeight.bold)))).toList()),..._extra(r).entries.where((e)=>!['id','type','party','description'].contains(e.key)).map((e)=>pw.TableRow(children:[pw.Padding(padding:const pw.EdgeInsets.all(7),child:pw.Text(e.key,style:const pw.TextStyle(fontSize:8))),pw.Padding(padding:const pw.EdgeInsets.all(7),child:pw.Text('${e.value}',style:const pw.TextStyle(fontSize:8)))]))]),pw.SizedBox(height:12),pw.Container(padding:const pw.EdgeInsets.all(12),decoration:pw.BoxDecoration(border:pw.Border.all(color:PdfColors.grey400),borderRadius:pw.BorderRadius.circular(6)),child:pw.Row(mainAxisAlignment:pw.MainAxisAlignment.spaceBetween,children:[pw.Text('TOTAL',style:pw.TextStyle(fontWeight:pw.FontWeight.bold)),pw.Text(money.format(_num(r['total'])),style:pw.TextStyle(fontWeight:pw.FontWeight.bold,fontSize:14))])),pw.SizedBox(height:12),pw.Center(child:pw.Text('Terima kasih atas kepercayaan Anda',style:pw.TextStyle(fontWeight:pw.FontWeight.bold,color:PdfColor.fromInt(0xFF087F5B))))]));
+    await Printing.sharePdf(bytes:await doc.save(),filename:'Nota_Gabah_${r['id']}.pdf');
+  }
+
+  Future<void> _printThermal(Map<String,dynamic> r) async {
+    try {
+      final devices=await PrintBluetoothThermal.pairedBluetooths;
+      if(devices.isEmpty){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Printer Bluetooth belum dipasangkan.')));return;}
+      final connected=await PrintBluetoothThermal.connect(macPrinterAddress:devices.first.macAdress);
+      if(!connected){if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Tidak dapat terhubung ke printer.')));return;}
+      final x=_extra(r); final type='${r['type']??''}';
+      final textReceipt='       WARUNG BAROKAH\\n'
+        '--------------------------------\\n'
+        '${type=='PENGIRIMAN'?'LAPORAN PENGIRIMAN':'NOTA JUAL BELI GABAH'}\\n'
+        'No: ${r['id']}\\nTanggal: ${r['date']}\\nPihak: ${r['party']}\\n'
+        'Jenis: ${x['variety']??'-'}\\n'
+        'Berat: ${x['net']??x['beratKirim']??0} kg\\n'
+        'Total: ${money.format(_num(r['total']))}\\n'
+        '--------------------------------\\nTerima kasih\\n\\n\\n';
+      await PrintBluetoothThermal.writeString(printText:PrintTextSize(size:1,text:textReceipt));
+      await PrintBluetoothThermal.disconnect;
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Nota dikirim ke printer Bluetooth.')));
+    }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Gagal mencetak: $e')));}
+  }
+
+  Widget _recordCard(Map<String,dynamic> r,{bool loan=false}) {
+    final x=_extra(r); final type='${r['type']??''}';
+    String subtitle='${r['date']??''}';
+    if(type=='PEMBELIAN'||type=='PENJUALAN') subtitle+=' • ${kgFormat.format(_num(x['net']))} kg • ${money.format(_num(r['total']))}';
+    if(type=='PENGIRIMAN') subtitle+=' • Beli ${kgFormat.format(_num(x['beratPembelian']))} kg • Kirim ${kgFormat.format(_num(x['beratKirim']))} kg • Pabrik ${kgFormat.format(_num(x['beratPabrik']))} kg • Selisih total ${kgFormat.format(_num(x['selisih']))} kg';
+    if(loan) subtitle+=' • Sisa ${money.format(_loanBalance(r))}';
+    return Card(child:ListTile(leading:CircleAvatar(backgroundColor:green.withOpacity(.12),child:Icon(loan?Icons.account_balance_wallet: type=='PENGIRIMAN'?Icons.local_shipping:Icons.receipt_long,color:green)),title:Text('${r['party']??'-'}',style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text(subtitle),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='pdf')_pdf(r);if(v=='print')_printThermal(r);if(v=='return'&&loan)_repayDialog(r);},itemBuilder:(ctx)=>[const PopupMenuItem(value:'pdf',child:Text('Bagikan nota PDF')),const PopupMenuItem(value:'print',child:Text('Cetak Bluetooth')),if(loan&&_loanBalance(r)>0)const PopupMenuItem(value:'return',child:Text('Catat pengembalian'))])));
+  }
+
+  Widget _dashboard() => RefreshIndicator(onRefresh:_load,child:ListView(padding:const EdgeInsets.only(bottom:24),children:[if(error.isNotEmpty)Padding(padding:const EdgeInsets.all(12),child:Text('Peringatan: $error',style:const TextStyle(color:Colors.red))),GridView.count(crossAxisCount:2,shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),childAspectRatio:1.9,children:[_metric('Stok gabah', '${kgFormat.format(_stock)} kg',Icons.warehouse),_metric('Pembelian',money.format(_totalPembelian),Icons.shopping_cart),_metric('Penjualan langsung',money.format(_totalPenjualan),Icons.store),_metric('Nilai kirim pabrik',money.format(_totalPengiriman),Icons.local_shipping)]),_sectionTitle('Aktivitas terbaru','Transaksi pembelian, penjualan, pinjaman dan pengiriman'),..._rows.reversed.take(8).map((r)=>_recordCard(r)),if(_rows.isEmpty)_empty('Belum ada transaksi gabah. Mulai dari menu Pembelian.') ]));
+  Widget _purchases() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_purchaseDialog,icon:const Icon(Icons.add),label:const Text('Catat Pembelian Gabah'))),..._type('PEMBELIAN').reversed.map((r)=>_recordCard(r)),if(_type('PEMBELIAN').isEmpty)_empty('Belum ada pembelian gabah.')]);
+  Widget _sales() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.add),label:const Text('Catat Penjualan Gabah'))),..._type('PENJUALAN').reversed.map((r)=>_recordCard(r)),if(_type('PENJUALAN').isEmpty)_empty('Belum ada penjualan gabah.')]);
+  Widget _loans() {final loans=_type('PINJAMAN');return ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_loanDialog,icon:const Icon(Icons.add),label:const Text('Berikan Pinjaman'))),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Text('Total saldo pinjaman: ${money.format(loans.fold(0.0,(a,r)=>a+_loanBalance(r)))}',style:const TextStyle(fontWeight:FontWeight.bold))),...loans.reversed.map((r)=>_recordCard(r,loan:true)),if(loans.isEmpty)_empty('Belum ada pinjaman kepada petani atau pengepul.')]);}
+  Widget _shipments() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_shipmentDialog,icon:const Icon(Icons.add),label:const Text('Buat Laporan Pengiriman ke Pabrik'))),..._type('PENGIRIMAN').reversed.map((r)=>_recordCard(r)),if(_type('PENGIRIMAN').isEmpty)_empty('Belum ada pengiriman ke pabrik.')]);
+  Widget _stockPage() {final purchases=_type('PEMBELIAN');final sales=_type('PENJUALAN');final ships=_type('PENGIRIMAN');final varieties=<String>{...purchases.map((r=>'${r['variety']??'Gabah'}')),...sales.map((r=>'${r['variety']??'Gabah'}')),...ships.map((r=>'${r['variety']??'Gabah'}'))};return ListView(padding:const EdgeInsets.all(12),children:[_metric('Stok tersedia','${kgFormat.format(_stock)} kg',Icons.warehouse),const SizedBox(height:8),_metric('Total masuk','${kgFormat.format(purchases.fold(0.0,(a,r)=>a+_num(r['net'])))} kg',Icons.south_west),const SizedBox(height:8),_metric('Penjualan langsung','${kgFormat.format(sales.fold(0.0,(a,r)=>a+_num(r['net'])))} kg',Icons.north_east),const SizedBox(height:8),_metric('Keluar ke pabrik','${kgFormat.format(ships.fold(0.0,(a,r)=>a+_num(r['beratPembelian'])))} kg',Icons.local_shipping),_sectionTitle('Stok per jenis gabah','Stok dihitung dari pembelian dikurangi penjualan dan pengiriman'),...varieties.map((v)=>Card(child:ListTile(title:Text(v),trailing:Text('${kgFormat.format(_stockFor(v))} kg',style:const TextStyle(fontWeight:FontWeight.bold,color:green)))))]);}
+  Widget _reports() {final shipments=_type('PENGIRIMAN');final diff=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['selisih']));final profit=shipments.fold(0.0,(a,r)=>a+_num(_extra(r)['labaBersih']));final loan=_type('PINJAMAN').fold(0.0,(a,r)=>a+_loanBalance(r));return ListView(padding:const EdgeInsets.all(12),children:[_metric('Total pembelian',money.format(_totalPembelian),Icons.shopping_cart),const SizedBox(height:8),_metric('Total penjualan langsung',money.format(_totalPenjualan),Icons.store),const SizedBox(height:8),_metric('Total nilai pengiriman pabrik',money.format(_totalPengiriman),Icons.business),const SizedBox(height:8),_metric('Total selisih timbangan', '${kgFormat.format(diff)} kg',Icons.scale),const SizedBox(height:8),_metric('Laba pengiriman (estimasi)',money.format(profit),Icons.trending_up),const SizedBox(height:8),_metric('Sisa pinjaman petani/pengepul',money.format(loan),Icons.account_balance_wallet),const SizedBox(height:12),const Text('Rincian pengiriman per transaksi',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),...shipments.reversed.map((r)=>_recordCard(r))]);}
+
+  @override
+  Widget build(BuildContext context) => Scaffold(backgroundColor:pale,appBar:AppBar(title:const Text('Jual Beli Gabah / Padi'),actions:[IconButton(onPressed:_load,icon:const Icon(Icons.refresh),tooltip:'Muat ulang')],bottom:TabBar(controller:tabs,isScrollable:true,tabs:const[Tab(text:'Ringkasan'),Tab(text:'Pembelian'),Tab(text:'Penjualan'),Tab(text:'Pinjaman'),Tab(text:'Pengiriman'),Tab(text:'Stok'),Tab(text:'Laporan')])),body:loading&&data.isEmpty?const Center(child:CircularProgressIndicator()):TabBarView(controller:tabs,children:[_dashboard(),_purchases(),_sales(),_loans(),_shipments(),_stockPage(),_reports()]));
+}
+
 class LpgModuleScreen extends StatefulWidget {
   final String apiUrl;
   const LpgModuleScreen({super.key, required this.apiUrl});
@@ -3032,7 +3216,7 @@ class _LpgModuleScreenState extends State<LpgModuleScreen> {
       if(name.text.trim().isEmpty){_msg('Nama pelanggan wajib diisi.');return;}
       final id='${existing?['id'] ?? 'C-${DateTime.now().millisecondsSinceEpoch}'}';
       try{await _commit([{'sheet':'LPG_Pelanggan','id':id,'date':dateNow(),'name':name.text,'owner':owner.text,'address':address.text,'wa':wa.text,'price_3':d(p3.text),'price_55':d(p55.text),'price_12':d(p12.text),'active':true}]);if(ctx.mounted)Navigator.pop(ctx);}catch(e){_msg('Gagal: $e');}
-    },child:const Text('Simpan'))]));
+    },child:const Text('Simpan'))])));
   }
 
   Future<void> _openingBorrowedDialog() async {
