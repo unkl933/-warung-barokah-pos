@@ -2750,11 +2750,11 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
   }
   List<Map<String,dynamic>> get _rows => data.map((r) => <String,dynamic>{...r, ..._extra(r)}).toList();
   List<Map<String,dynamic>> _type(String t) => _rows.where((r) => r['type'] == t && r['voided'] != true).toList();
-  double get _stock => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENJUALAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENGIRIMAN').fold(0.0,(a,r)=>a+_num(r['beratPembelian']));
+  double get _stock => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENJUALAN').fold(0.0,(a,r)=>a+_num(r['net'])) - _type('PENGIRIMAN').fold(0.0,(a,r)=>a+_num(r['beratPembelian'])) + _type('PENYESUAIAN_STOK').fold(0.0,(a,r)=>a+_num(r['qty']));
   double get _totalPembelian => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['total']));
   double get _totalPenjualan => _type('PENJUALAN').fold(0.0,(a,r)=>a+_num(r['total']));
   double get _totalPengiriman => _type('PENGIRIMAN').fold(0.0,(a,r)=>a+_num(r['nilaiJual']));
-  double _stockFor(String variety) { final p=_type('PEMBELIAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final s=_type('PENJUALAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final h=_type('PENGIRIMAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['beratPembelian'])); return p-s-h; }
+  double _stockFor(String variety) { final p=_type('PEMBELIAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final s=_type('PENJUALAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['net'])); final h=_type('PENGIRIMAN').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['beratPembelian'])); final adj=_type('PENYESUAIAN_STOK').where((r)=>'${r['variety']}'==variety).fold(0.0,(a,r)=>a+_num(r['qty'])); return p-s-h+adj; }
   double _avgCostFor(String variety) { final rows=_type('PEMBELIAN').where((r)=>'${r['variety']}'==variety).toList(); final qty=rows.fold(0.0,(a,r)=>a+_num(r['net'])); final value=rows.fold(0.0,(a,r)=>a+_num(r['total'])); return qty<=0?0:value/qty; }
   double get _avgCost => _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['total'])) / (_type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])) == 0 ? 1 : _type('PEMBELIAN').fold(0.0,(a,r)=>a+_num(r['net'])));
   double _loanBalance(Map<String,dynamic> loan) {
@@ -2782,11 +2782,11 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
     } finally { if (mounted) setState(() => loading = false); }
   }
 
-  Future<void> _save({required String type, required String party, required String description, double qty=0, String unit='kg', double buyPrice=0, double sellPrice=0, required double total, String payment='Tunai', String status='Tersimpan', required Map<String,dynamic> extra}) async {
-    final id = _id('GBH');
+  Future<void> _save({String? recordId, String? recordDate, required String type, required String party, required String description, double qty=0, String unit='kg', double buyPrice=0, double sellPrice=0, required double total, String payment='Tunai', String status='Tersimpan', required Map<String,dynamic> extra}) async {
+    final id = recordId ?? _id('GBH');
     final payload = {
       'action':'saveModuleRecord','module':'GABAH','id':id,
-      'date':DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
+      'date':recordDate ?? DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
       'type':type,'party':party,'description':description,'qty':qty,'unit':unit,
       'buyPrice':buyPrice,'sellPrice':sellPrice,'total':total,'payment':payment,
       'status':status,'extra':jsonEncode({...extra,'id':id,'type':type,'party':party,'description':description,'total':total,'payment':payment,'status':status})
@@ -2826,6 +2826,214 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
       throw Exception(result['message'] ?? 'Gagal menyimpan');
     }
     await _load();
+  }
+
+
+  Future<void> _postGabahAction(Map<String, dynamic> payload) async {
+    final client = http.Client();
+    try {
+      final request = http.Request('POST', Uri.parse(widget.apiUrl))
+        ..followRedirects = false
+        ..headers['Content-Type'] = 'application/json'
+        ..body = jsonEncode(payload);
+      var response = await http.Response.fromStream(
+        await client.send(request).timeout(const Duration(seconds: 40)),
+      );
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        final location = response.headers['location'];
+        if (location == null || location.isEmpty) {
+          throw Exception('HTTP ${response.statusCode}: alamat pengalihan tidak tersedia.');
+        }
+        response = await client.get(Uri.parse(location))
+            .timeout(const Duration(seconds: 40));
+      }
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}: ${response.body}');
+      }
+      final result = jsonDecode(response.body);
+      if (result is Map && result['status'] == 'error') {
+        throw Exception(result['message'] ?? 'Permintaan gagal');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _deleteRecord(Map<String, dynamic> r) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus transaksi?'),
+        content: Text(
+          'Transaksi ${r['id']} (${r['type']}) akan dihapus. '
+          'Perubahan stok dan saldo yang berasal dari transaksi ini juga akan berubah.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    try {
+      await _postGabahAction({
+        'action': 'deleteModuleRecord',
+        'module': 'GABAH',
+        'id': r['id'],
+      });
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Transaksi berhasil dihapus.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal menghapus: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _editRecordDialog(Map<String, dynamic> r) async {
+    final x = _extra(r);
+    final type = '${r['type'] ?? ''}';
+    final party = TextEditingController(text: '${r['party'] ?? ''}');
+    final variety = TextEditingController(text: '${x['variety'] ?? 'Gabah'}');
+    final quantity = TextEditingController(
+      text: type == 'PENGIRIMAN'
+          ? '${x['beratPembelian'] ?? 0}'
+          : type == 'PINJAMAN'
+              ? '${x['amount'] ?? r['total'] ?? 0}'
+              : '${x['net'] ?? r['qty'] ?? 0}',
+    );
+    final total = TextEditingController(text: '${r['total'] ?? 0}');
+    final price = TextEditingController(text: '${x['price'] ?? x['hargaPabrik'] ?? r['sellPrice'] ?? r['buyPrice'] ?? 0}');
+    final payment = TextEditingController(text: '${r['payment'] ?? 'Tunai'}');
+    final description = TextEditingController(text: '${r['description'] ?? ''}');
+    final received = TextEditingController(text: '${x['beratPabrik'] ?? 0}');
+    final dispatched = TextEditingController(text: '${x['beratKirim'] ?? 0}');
+
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Edit transaksi gabah'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _field(party, 'Nama petani / pembeli / pabrik'),
+                const SizedBox(height: 9),
+                _field(description, 'Keterangan'),
+                const SizedBox(height: 9),
+                _field(variety, 'Jenis gabah'),
+                const SizedBox(height: 9),
+                _field(
+                  quantity,
+                  type == 'PINJAMAN'
+                      ? 'Jumlah pinjaman (Rp)'
+                      : type == 'PENGIRIMAN'
+                          ? 'Berat pembelian untuk pengiriman (kg)'
+                          : 'Berat netto (kg)',
+                  number: true,
+                ),
+                if (type == 'PENGIRIMAN') ...[
+                  const SizedBox(height: 9),
+                  _field(dispatched, 'Berat keluar gudang (kg)', number: true),
+                  const SizedBox(height: 9),
+                  _field(received, 'Berat diterima pabrik (kg)', number: true),
+                ],
+                const SizedBox(height: 9),
+                _field(price, 'Harga per kg (Rp)', number: true),
+                const SizedBox(height: 9),
+                _field(total, 'Total transaksi (Rp)', number: true),
+                const SizedBox(height: 9),
+                _field(payment, 'Metode pembayaran'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: () async {
+                final q = _num(quantity.text);
+                final amount = _num(total.text);
+                if (party.text.trim().isEmpty || q < 0 || amount < 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Periksa nama, jumlah, dan total transaksi.')),
+                  );
+                  return;
+                }
+                final updated = Map<String, dynamic>.from(x);
+                updated['variety'] = variety.text.trim();
+                if (type == 'PINJAMAN') {
+                  updated['amount'] = q;
+                } else if (type == 'PENGIRIMAN') {
+                  updated['beratPembelian'] = q;
+                  updated['beratKirim'] = _num(dispatched.text);
+                  updated['beratPabrik'] = _num(received.text);
+                  updated['selisih'] = q - _num(received.text);
+                  updated['selisihPersen'] = q == 0 ? 0 : (q - _num(received.text)) / q * 100;
+                  updated['susutGudang'] = q - _num(dispatched.text);
+                  updated['selisihPerjalanan'] = _num(dispatched.text) - _num(received.text);
+                  updated['hargaPabrik'] = _num(price.text);
+                  updated['nilaiJual'] = _num(received.text) * _num(price.text);
+                  updated['labaBersih'] = _num(total.text) - _num(updated['modal']) - _num(updated['totalBiaya']);
+                } else {
+                  updated['net'] = q;
+                  updated['price'] = _num(price.text);
+                }
+                try {
+                  await _save(
+                    recordId: '${r['id']}',
+                    recordDate: '${r['date'] ?? ''}',
+                    type: type,
+                    party: party.text.trim(),
+                    description: description.text.trim(),
+                    qty: type == 'PINJAMAN' ? 0 : q,
+                    buyPrice: _num(r['buyPrice']),
+                    sellPrice: _num(price.text),
+                    total: amount,
+                    payment: payment.text.trim(),
+                    status: '${r['status'] ?? 'Tersimpan'}',
+                    extra: updated,
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Perubahan transaksi tersimpan.')),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Gagal mengedit: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Simpan perubahan'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      party.dispose();
+      variety.dispose();
+      quantity.dispose();
+      total.dispose();
+      price.dispose();
+      payment.dispose();
+      description.dispose();
+      received.dispose();
+      dispatched.dispose();
+    }
   }
 
   Widget _metric(String label, String value, IconData icon, {Color color=green}) => Card(child: Padding(padding: const EdgeInsets.all(14), child: Row(children:[CircleAvatar(backgroundColor:color.withOpacity(.12),child:Icon(icon,color:color)),const SizedBox(width:12),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(label,style:const TextStyle(color:Colors.black54,fontSize:12)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:17))]))])));
@@ -2898,7 +3106,23 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
     if(type=='PEMBELIAN'||type=='PENJUALAN') subtitle+=' • ${kgFormat.format(_num(x['net']))} kg • ${money.format(_num(r['total']))}';
     if(type=='PENGIRIMAN') subtitle+=' • Beli ${kgFormat.format(_num(x['beratPembelian']))} kg • Kirim ${kgFormat.format(_num(x['beratKirim']))} kg • Pabrik ${kgFormat.format(_num(x['beratPabrik']))} kg • Selisih total ${kgFormat.format(_num(x['selisih']))} kg';
     if(loan) subtitle+=' • Sisa ${money.format(_loanBalance(r))}';
-    return Card(child:ListTile(leading:CircleAvatar(backgroundColor:green.withOpacity(.12),child:Icon(loan?Icons.account_balance_wallet: type=='PENGIRIMAN'?Icons.local_shipping:Icons.receipt_long,color:green)),title:Text('${r['party']??'-'}',style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text(subtitle),isThreeLine:true,trailing:PopupMenuButton<String>(onSelected:(v){if(v=='pdf')_pdf(r);if(v=='print')_printThermal(r);if(v=='return'&&loan)_repayDialog(r);},itemBuilder:(ctx)=>[const PopupMenuItem(value:'pdf',child:Text('Bagikan nota PDF')),const PopupMenuItem(value:'print',child:Text('Cetak Bluetooth')),if(loan&&_loanBalance(r)>0)const PopupMenuItem(value:'return',child:Text('Catat pengembalian'))])));
+    return Card(child:ListTile(leading:CircleAvatar(backgroundColor:green.withOpacity(.12),child:Icon(loan?Icons.account_balance_wallet: type=='PENGIRIMAN'?Icons.local_shipping:Icons.receipt_long,color:green)),title:Text('${r['party']??'-'}',style:const TextStyle(fontWeight:FontWeight.w600)),subtitle:Text(subtitle),isThreeLine:true,trailing:PopupMenuButton<String>(
+      onSelected:(v){
+        if(v=='pdf') _pdf(r);
+        if(v=='print') _printThermal(r);
+        if(v=='return'&&loan) _repayDialog(r);
+        if(v=='edit') _editRecordDialog(r);
+        if(v=='delete') _deleteRecord(r);
+      },
+      itemBuilder:(ctx)=>[
+        const PopupMenuItem(value:'edit',child:Text('Edit transaksi')),
+        const PopupMenuItem(value:'delete',child:Text('Hapus transaksi')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value:'pdf',child:Text('Bagikan nota PDF')),
+        const PopupMenuItem(value:'print',child:Text('Cetak Bluetooth')),
+        if(loan&&_loanBalance(r)>0) const PopupMenuItem(value:'return',child:Text('Catat pengembalian')),
+      ],
+    )));
   }
 
   Widget _dashboard() => RefreshIndicator(onRefresh:_load,child:ListView(padding:const EdgeInsets.only(bottom:24),children:[if(error.isNotEmpty)Padding(padding:const EdgeInsets.all(12),child:Text('Peringatan: $error',style:const TextStyle(color:Colors.red))),GridView.count(crossAxisCount:2,shrinkWrap:true,physics:const NeverScrollableScrollPhysics(),childAspectRatio:1.9,children:[_metric('Stok gabah', '${kgFormat.format(_stock)} kg',Icons.warehouse),_metric('Pembelian',money.format(_totalPembelian),Icons.shopping_cart),_metric('Penjualan langsung',money.format(_totalPenjualan),Icons.store),_metric('Nilai kirim pabrik',money.format(_totalPengiriman),Icons.local_shipping)]),_sectionTitle('Aktivitas terbaru','Transaksi pembelian, penjualan, pinjaman dan pengiriman'),..._rows.reversed.take(8).map((r)=>_recordCard(r)),if(_rows.isEmpty)_empty('Belum ada transaksi gabah. Mulai dari menu Pembelian.') ]));
@@ -2906,6 +3130,91 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
   Widget _sales() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_saleDialog,icon:const Icon(Icons.add),label:const Text('Catat Penjualan Gabah'))),..._type('PENJUALAN').reversed.map((r)=>_recordCard(r)),if(_type('PENJUALAN').isEmpty)_empty('Belum ada penjualan gabah.')]);
   Widget _loans() {final loans=_type('PINJAMAN');return ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_loanDialog,icon:const Icon(Icons.add),label:const Text('Berikan Pinjaman'))),Padding(padding:const EdgeInsets.symmetric(horizontal:16),child:Text('Total saldo pinjaman: ${money.format(loans.fold(0.0,(a,r)=>a+_loanBalance(r)))}',style:const TextStyle(fontWeight:FontWeight.bold))),...loans.reversed.map((r)=>_recordCard(r,loan:true)),if(loans.isEmpty)_empty('Belum ada pinjaman kepada petani atau pengepul.')]);}
   Widget _shipments() => ListView(padding:const EdgeInsets.only(bottom:24),children:[Padding(padding:const EdgeInsets.all(12),child:FilledButton.icon(onPressed:_shipmentDialog,icon:const Icon(Icons.add),label:const Text('Buat Laporan Pengiriman ke Pabrik'))),..._type('PENGIRIMAN').reversed.map((r)=>_recordCard(r)),if(_type('PENGIRIMAN').isEmpty)_empty('Belum ada pengiriman ke pabrik.')]);
+
+  Future<void> _stockAdjustDialog(String variety) async {
+    final existing = _type('PENYESUAIAN_STOK')
+        .where((r) => '${r['variety']}' == variety)
+        .toList();
+    final current = _stockFor(variety);
+    final oldAdjustment = existing.fold(0.0, (a, r) => a + _num(r['qty']));
+    final baseStock = current - oldAdjustment;
+    final target = TextEditingController(text: current.toStringAsFixed(2));
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Atur stok $variety'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Stok saat ini: ${kgFormat.format(current)} kg'),
+              const SizedBox(height: 12),
+              _field(target, 'Stok fisik sebenarnya (kg)', number: true),
+              const SizedBox(height: 8),
+              const Text(
+                'Sistem menyimpan selisih sebagai penyesuaian stok agar riwayat pembelian, penjualan, dan pengiriman tetap terjaga.',
+                style: TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(
+              onPressed: () async {
+                final physical = _num(target.text);
+                if (physical < 0) return;
+                final delta = physical - baseStock;
+                try {
+                  // Satu record penyesuaian per varietas; disimpan dengan ID stabil
+                  // agar perubahan berikutnya memperbarui record yang sama.
+                  await _save(
+                    recordId: 'STK-${Uri.encodeComponent(variety)}',
+                    type: 'PENYESUAIAN_STOK',
+                    party: 'Penyesuaian stok',
+                    description: 'Penyesuaian stok fisik $variety',
+                    qty: delta,
+                    total: 0,
+                    payment: '-',
+                    status: 'Disesuaikan',
+                    extra: {
+                      'variety': variety,
+                      'qty': delta,
+                      'stokFisik': physical,
+                      'tanggalPenyesuaian': DateTime.now().toIso8601String(),
+                    },
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Gagal mengatur stok: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Simpan stok'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      target.dispose();
+    }
+  }
+
+  Future<void> _deleteStockAdjustment(String variety) async {
+    final rows = _type('PENYESUAIAN_STOK')
+        .where((r) => '${r['variety']}' == variety)
+        .toList();
+    if (rows.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Belum ada penyesuaian stok untuk jenis ini.')),
+      );
+      return;
+    }
+    await _deleteRecord(rows.first);
+  }
+
   Widget _stockPage() {
     final purchases = _type('PEMBELIAN');
     final sales = _type('PENJUALAN');
@@ -2914,6 +3223,7 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
       ...purchases.map((r) => (r['variety'] ?? 'Gabah').toString()),
       ...sales.map((r) => (r['variety'] ?? 'Gabah').toString()),
       ...ships.map((r) => (r['variety'] ?? 'Gabah').toString()),
+      ..._type('PENYESUAIAN_STOK').map((r) => (r['variety'] ?? 'Gabah').toString()),
     };
     return ListView(
       padding: const EdgeInsets.all(12),
@@ -2929,7 +3239,22 @@ class _GabahModuleScreenState extends State<GabahModuleScreen> with SingleTicker
         ...varieties.map((v) => Card(
           child: ListTile(
             title: Text(v),
-            trailing: Text('${kgFormat.format(_stockFor(v))} kg', style: const TextStyle(fontWeight: FontWeight.bold, color: green)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${kgFormat.format(_stockFor(v))} kg', style: const TextStyle(fontWeight: FontWeight.bold, color: green)),
+                PopupMenuButton<String>(
+                  onSelected: (action) {
+                    if (action == 'edit') _stockAdjustDialog(v);
+                    if (action == 'delete') _deleteStockAdjustment(v);
+                  },
+                  itemBuilder: (ctx) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit stok fisik')),
+                    PopupMenuItem(value: 'delete', child: Text('Hapus penyesuaian stok')),
+                  ],
+                ),
+              ],
+            ),
           ),
         )),
       ],
